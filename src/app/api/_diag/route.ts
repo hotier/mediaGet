@@ -1,5 +1,6 @@
 // 临时诊断端点：验证 Next.js 运行时下抖音 user 主页请求是否可用
 // 用完即删
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 
 const WEB_UA =
@@ -36,12 +37,12 @@ export async function GET(request: NextRequest) {
   const report: Record<string, unknown> = {};
 
   // 1) 短链拿 ttwid
-  let res = await fetch("https://v.douyin.com/hYC-GrlrVrM/", {
+  const res = await fetch("https://v.douyin.com/hYC-GrlrVrM/", {
     headers: { "User-Agent": WEB_UA, Accept: "text/html,application/xhtml+xml" },
     redirect: "follow",
     signal: AbortSignal.timeout(10000),
   });
-  let ttwid = extractTtwid(res);
+  const ttwid = extractTtwid(res);
   report.ttwid = ttwid ? "有" : "无";
 
   // 2) user 主页请求
