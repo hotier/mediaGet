@@ -245,7 +245,10 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
 
       {/* 博文：媒体下方，可一键复制（与小红书文案卡片一致） */}
       {(weiboData.desc || weiboData.title) && (
-        <CaptionBox text={weiboData.desc || weiboData.title} title="博文" />
+        <CaptionBox
+          text={(weiboData.desc || weiboData.title)!}
+          title="博文"
+        />
       )}
 
       {/* 微博信息：发布时间 / 点赞 / 评论 / 转发（博主卡已展示作者信息） */}
