@@ -218,18 +218,16 @@ const cases: ShareParseCase[] = [
     expectUrl: null,
   },
   {
-    name: "无效-图床CDN图片链接（jsdmirror）",
-    input:
-      "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/wp/1782738963299-5wrchz.jpg",
+    name: "无效-图床CDN图片链接",
+    input: "https://cdn.example.com/img/1782738963299.jpg",
     expectPlatform: null,
-    expectUrl:
-      "https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/wp/1782738963299-5wrchz.jpg",
+    expectUrl: "https://cdn.example.com/img/1782738963299.jpg",
   },
   {
     name: "无效-普通网站链接（github）",
-    input: "https://github.com/wu529778790/parse.shenzjd.com",
+    input: "https://github.com/example/mediaget",
     expectPlatform: null,
-    expectUrl: "https://github.com/wu529778790/parse.shenzjd.com",
+    expectUrl: "https://github.com/example/mediaget",
   },
   {
     name: "无效-微信链接（mp.weixin）",

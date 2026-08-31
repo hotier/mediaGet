@@ -2,6 +2,8 @@
 import React from "react";
 import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
+import ParseInfoPanel from "./ParseInfoPanel";
+import CaptionBox from "./CaptionBox";
 
 interface PipigxVideoProps {
   data: ApiResponse;
@@ -15,14 +17,12 @@ export default function PipigxVideo({ data }: PipigxVideoProps) {
   const pipigxData = data.data as ParseData;
 
   return (
-    <>
-      {pipigxData.title && (
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-            {pipigxData.title}
-          </h2>
-        </div>
-      )}
+    <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
+      <ParseInfoPanel data={pipigxData} title="作品信息" />
+
+      {/* 文案：视频信息与下载按钮之间，可一键复制 */}
+      {pipigxData.title && <CaptionBox text={pipigxData.title} title="文案" />}
+
       {pipigxData.url && (
         <VideoPosterCard
           url={pipigxData.url}
@@ -31,6 +31,7 @@ export default function PipigxVideo({ data }: PipigxVideoProps) {
           accent="blue"
         />
       )}
-    </>
+
+    </div>
   );
 }

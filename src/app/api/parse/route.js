@@ -57,7 +57,11 @@ async function unifiedParser(input, options = {}) {
         };
       }
 
-      const platform = identifyPlatform(input);
+      // 汽水音乐特判：music.douyin.com / qishui.douyin.com 会按 .douyin.com
+      // 后缀被 identifyPlatform 误判为 douyin（抖音解析器无法处理），须先拦截。
+      const platform = /music\.douyin\.com|qishui\.douyin\.com/i.test(input)
+        ? "qsmusic"
+        : identifyPlatform(input);
 
       if (!platform) {
         return {

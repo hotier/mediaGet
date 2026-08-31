@@ -2,41 +2,79 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === CYBER-ORGANIC FLOW DESIGN SYSTEM === */
+/* === 即刻解析 · AI 现代设计系统 ===
+   主题策略：class 模式
+   - :root 定义浅色令牌
+   - .dark class 覆盖为深色令牌（由 ThemeToggle / 初始化脚本在 <html> 上显式挂载）
+   - 平台强调色 / 语义色在 .dark 下继承 :root，无需重复 */
 
 @layer base {
   :root {
-    /* 声明浅色为默认原生配色方案，让浏览器原生控件（表单、滚动条等）跟随 */
+    /* 声明浅色为默认原生配色方案，让浏览器原生控件跟随 */
     color-scheme: light;
 
-    /* Core Palette - Deep Space */
-    --background: #030014;
-    --foreground: #f0f0f5;
+    /* Core Palette - 薄荷青绿白 */
+    --background: #f2f8f6;
+    --foreground: #0c2b26;
 
-    /* Glass Layers */
-    --glass-1: rgba(255, 255, 255, 0.03);
-    --glass-2: rgba(255, 255, 255, 0.06);
-    --glass-3: rgba(255, 255, 255, 0.1);
+    /* Glass Layers（浅色下更通透的磨砂白，微带青绿） */
+    --glass-1: rgba(255, 255, 255, 0.66);
+    --glass-2: rgba(255, 255, 255, 0.84);
+    --glass-3: rgba(8, 47, 41, 0.05);
 
-    /* Platform Accents */
+    /* Platform Accents（与平台色板保持一致，作为强调色） */
     --accent-douyin: #fe2c55;
     --accent-bilibili: #00aeec;
     --accent-kuaishou: #ff6600;
     --accent-weibo: #e6162d;
     --accent-xhs: #ff2442;
 
-    /* Dynamic Accent (changes with platform) */
-    --accent: #6366f1;
+    /* Dynamic Accent（跟随当前解析平台动态变化；默认品牌薄荷青绿） */
+    --accent: #14b8a6;
 
     /* Semantic */
-    --success: #22c55e;
-    --error: #ef4444;
-    --warning: #f59e0b;
+    --success: #0d9f6e;
+    --error: #dc2626;
+    --warning: #d97706;
 
     /* Text */
-    --text-primary: #f0f0f5;
-    --text-secondary: #a0a0b0;
-    --text-muted: #6b6b7b;
+    --text-primary: #0c2b26;
+    --text-secondary: #47605a;
+    --text-muted: #7d9892;
+
+    /* Borders */
+    --border-subtle: rgba(12, 43, 38, 0.08);
+    --border-medium: rgba(12, 43, 38, 0.12);
+    --border-strong: rgba(12, 43, 38, 0.2);
+
+    /* Shadows */
+    --shadow-glow: 0 0 60px rgba(20, 184, 166, 0.18);
+    --shadow-card: 0 10px 40px rgba(12, 43, 38, 0.08);
+
+    /* Aurora 背景元素（薄荷青绿光晕） */
+    --grid-line: rgba(20, 184, 166, 0.06);
+    --orb-1: rgba(20, 184, 166, 0.16);
+    --orb-2: rgba(6, 182, 212, 0.12);
+    --orb-3: rgba(52, 211, 153, 0.1);
+    --noise-opacity: 0.02;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Core Palette - 深青墨（青黑，区别于纯黑，强化品牌辨识度） */
+    --background: #051210;
+    --foreground: #edf7f4;
+
+    /* Glass Layers */
+    --glass-1: rgba(255, 255, 255, 0.03);
+    --glass-2: rgba(255, 255, 255, 0.06);
+    --glass-3: rgba(255, 255, 255, 0.1);
+
+    /* Text */
+    --text-primary: #edf7f4;
+    --text-secondary: #a3bdb6;
+    --text-muted: #67837b;
 
     /* Borders */
     --border-subtle: rgba(255, 255, 255, 0.08);
@@ -44,39 +82,15 @@
     --border-strong: rgba(255, 255, 255, 0.2);
 
     /* Shadows */
-    --shadow-glow: 0 0 60px rgba(99, 102, 241, 0.15);
-    --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-  }
+    --shadow-glow: 0 0 60px rgba(20, 184, 166, 0.25);
+    --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.45);
 
-  @media (prefers-color-scheme: light) {
-    :root {
-      color-scheme: light;
-
-      --background: #fafafa;
-      --foreground: #1a1a2e;
-
-      --glass-1: rgba(0, 0, 0, 0.02);
-      --glass-2: rgba(0, 0, 0, 0.04);
-      --glass-3: rgba(0, 0, 0, 0.06);
-
-      --text-primary: #1a1a2e;
-      --text-secondary: #4a4a5a;
-      --text-muted: #8a8a9a;
-
-      --border-subtle: rgba(0, 0, 0, 0.06);
-      --border-medium: rgba(0, 0, 0, 0.1);
-      --border-strong: rgba(0, 0, 0, 0.15);
-
-      --shadow-glow: 0 0 60px rgba(99, 102, 241, 0.08);
-      --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.08);
-    }
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      /* 深色模式下声明原生配色方案为 dark，让浏览器原生控件跟随深色 */
-      color-scheme: dark;
-    }
+    /* Aurora 背景元素 */
+    --grid-line: rgba(255, 255, 255, 0.045);
+    --orb-1: rgba(20, 184, 166, 0.3);
+    --orb-2: rgba(6, 182, 212, 0.22);
+    --orb-3: rgba(52, 211, 153, 0.18);
+    --noise-opacity: 0.015;
   }
 
   * {
@@ -92,11 +106,7 @@
     color: var(--text-primary);
     font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     overflow-x: hidden;
-  }
-
-  /* 顶部导航 Web Component：custom element 默认 display:inline，显式改为 block 参与文档流 */
-  site-navbar {
-    display: block;
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 
   /* Custom Scrollbar */
@@ -122,100 +132,19 @@
 
   /* Selection */
   ::selection {
-    background-color: rgb(99 102 241 / 0.2);
+    background-color: rgb(20 184 166 / 0.2);
     color: var(--accent);
+  }
+
+  /* 焦点可见性（无障碍） */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
   }
 }
 
 @layer components {
-  /* Glass Card Base */
-  .glass-card {
-    background-color: var(--glass-1);
-    backdrop-filter: blur(24px);
-    border-radius: 1rem;
-    border: 1px solid var(--border-subtle);
-    box-shadow: var(--shadow-card);
-  }
-
-  /* Iridescent Border Effect */
-  .iridescent-border {
-    position: relative;
-    background: var(--glass-1);
-    backdrop-filter: blur(20px);
-  }
-
-  .iridescent-border::before {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.1) 0%,
-      rgba(255, 255, 255, 0.05) 25%,
-      rgba(99, 102, 241, 0.2) 50%,
-      rgba(255, 255, 255, 0.05) 75%,
-      rgba(255, 255, 255, 0.1) 100%
-    );
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0;
-    transition: opacity 0.4s ease;
-    pointer-events: none;
-    z-index: 0;
-    /* Ensure it never captures touch events on mobile */
-    touch-action: none;
-  }
-
-  .iridescent-border:hover::before {
-    opacity: 1;
-  }
-
-  /* Glow Text */
-  .glow-text {
-    text-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
-  }
-
-  /* Shimmer Effect */
-  @keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-  }
-
-  .shimmer {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .shimmer::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.05) 50%,
-      transparent 100%
-    );
-    animation: shimmer 2s infinite;
-  }
-
-  /* Floating Animation */
-  @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-  }
-
-  .float-animation {
-    animation: float 4s ease-in-out infinite;
-  }
-
   /* Reveal Animation Stagger */
   @keyframes reveal-up {
     from {
@@ -239,28 +168,27 @@
   .reveal-delay-4 { animation-delay: 0.4s; }
   .reveal-delay-5 { animation-delay: 0.5s; }
 
-  /* Gradient Text */
+  /* Gradient Text（首页主标题强调） */
   .gradient-text {
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
-    background-image: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+    background-image: linear-gradient(135deg, #06b6d4 0%, #14b8a6 50%, #34d399 100%);
   }
 
-  /* Input Focus Glow */
+  /* Input Focus（克制：仅保留细描边） */
   .input-glow {
     transition: all 0.3s ease;
-    /* Prevent tap highlight on mobile */
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
 
   .input-glow:focus {
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 0 30px rgba(99, 102, 241, 0.1);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
   }
 
   /* Mobile touch handling for buttons */
-  button, a, .magnetic-btn {
+  button, a {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
@@ -270,82 +198,53 @@
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
-
-  /* Hover Lift */
-  .hover-lift {
-    transition: transform 0.3s ease;
-  }
-
-  .hover-lift:hover {
-    transform: translateY(-2px);
-  }
-
-  /* Paste Button Ripple */
-  .paste-btn {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .paste-btn::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 0;
-    height: 0;
-    border-radius: 50%;
-    background: rgba(99, 102, 241, 0.2);
-    transform: translate(-50%, -50%);
-    transition: width 0.6s, height 0.6s;
-  }
-
-  .paste-btn:active::before {
-    width: 300px;
-    height: 300px;
-  }
 }
 
-/* === MORPHING BACKGROUND === */
+/* === AURORA 背景 ===
+   固定全屏：网格 + 渐变光斑 + 噪点，赋予 AI 感氛围 */
+.aurora-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  touch-action: none;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 100%);
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 100%);
+}
+
 .morphing-bg {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   background: var(--background);
-  /* Ensure background never captures touch/click events */
   pointer-events: none;
   touch-action: none;
 }
 
 .morphing-bg::before {
-  content: '';
+  content: "";
   position: absolute;
   width: 150%;
   height: 150%;
   top: -25%;
   left: -25%;
   background:
-    radial-gradient(ellipse at 20% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 70%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, rgba(236, 72, 153, 0.04) 0%, transparent 60%);
-  animation: morph 20s ease-in-out infinite;
+    radial-gradient(ellipse at 20% 30%, var(--orb-1) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 70%, var(--orb-2) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, var(--orb-3) 0%, transparent 60%);
 }
 
-@keyframes morph {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  25% { transform: scale(1.1) rotate(5deg); }
-  50% { transform: scale(1) rotate(0deg); }
-  75% { transform: scale(1.05) rotate(-5deg); }
-}
-
-/* Floating Orbs */
+/* Floating Orbs（静态柔和光斑，去漂浮动画） */
 .orb {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.5;
-  animation: orb-float 15s ease-in-out infinite;
-  /* Ensure orbs never capture touch/click events */
+  opacity: 0.35;
   pointer-events: none;
   touch-action: none;
 }
@@ -355,8 +254,7 @@
   height: 400px;
   top: 10%;
   left: 10%;
-  background: rgba(99, 102, 241, 0.3);
-  animation-delay: 0s;
+  background: var(--orb-1);
 }
 
 .orb-2 {
@@ -364,8 +262,7 @@
   height: 300px;
   bottom: 20%;
   right: 10%;
-  background: rgba(168, 85, 247, 0.25);
-  animation-delay: -5s;
+  background: var(--orb-2);
 }
 
 .orb-3 {
@@ -373,15 +270,7 @@
   height: 250px;
   top: 50%;
   left: 50%;
-  background: rgba(236, 72, 153, 0.2);
-  animation-delay: -10s;
-}
-
-@keyframes orb-float {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(30px, -30px) scale(1.05); }
-  50% { transform: translate(-20px, 20px) scale(0.95); }
-  75% { transform: translate(20px, 10px) scale(1.02); }
+  background: var(--orb-3);
 }
 
 @media (max-width: 640px) {
@@ -394,10 +283,10 @@
 }
 
 .noise-overlay::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
-  opacity: 0.015;
+  opacity: var(--noise-opacity);
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
 }

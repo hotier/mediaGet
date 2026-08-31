@@ -6,6 +6,9 @@
 export const platformRoutes = {
   douyin: () => import("@/app/api/douyin/route.js"),
   bilibili: () => import("@/app/api/bilibili/route.js"),
+  // 汽水音乐（music.douyin.com / qishui.douyin.com）：统一入口识别特判返回
+  // 本 key，必须在此注册才能被 getPlatformParser 动态加载
+  qsmusic: () => import("@/app/api/qsmusic/route.js"),
   // key 必须与 lib/platforms.ts 的 PLATFORM_INFO 对齐（小红书是 redbook，
   // 统一入口 identifyPlatform 返回的 key），路由目录名仍是 /api/xhs
   redbook: () => import("@/app/api/xhs/route.js"),
@@ -46,7 +49,7 @@ export async function getPlatformParser(platform) {
       const routeParser = async (url) => {
         const request = new Request(
           `http://internal.local/api/parser?url=${encodeURIComponent(url)}`,
-          { headers: { "user-agent": "parse.shenzjd.com/internal-parser", "x-parse-internal": "1" } }
+          { headers: { "user-agent": "get.hotier.cc.cd/internal-parser", "x-parse-internal": "1" } }
         );
         const response = await mod.GET(request);
         if (!(response instanceof Response)) {

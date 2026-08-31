@@ -1,7 +1,10 @@
 "use client";
 import React, { useState } from "react";
 import Image from "next/image";
+import { ChevronDown, Download, ExternalLink } from "lucide-react";
 import { ApiResponse, ParseData } from "@/types/api";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface QsMusicVideoProps {
   data: ApiResponse;
@@ -17,70 +20,72 @@ export default function QsMusicVideo({ data }: QsMusicVideoProps) {
   const musicData = data.data as ParseData;
 
   return (
-    <>
-      <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg p-6 mb-6 text-white">
-        <div className="flex items-center gap-4 mb-4">
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="flex items-center gap-4 mb-5">
           {musicData.cover && (
             <Image
               src={musicData.cover}
               alt={musicData.name || "音乐封面"}
               width={80}
               height={80}
-              className="rounded-lg shadow-lg"
+              className="rounded-lg border border-border-subtle"
               unoptimized
             />
           )}
-          <div>
-            <h2 className="text-2xl font-bold mb-2">{musicData.name}</h2>
-            <p className="text-purple-100 text-sm">{musicData.core}</p>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-primary line-clamp-2">
+              {musicData.name}
+            </h2>
+            {musicData.core && (
+              <p className="text-sm text-secondary mt-1">{musicData.core}</p>
+            )}
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {musicData.url && (
-            <a
-              href={musicData.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-white text-purple-600 rounded-lg hover:bg-purple-50 transition-colors font-medium">
-              下载音乐
-            </a>
+            <Button
+              asChild
+              className="gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:opacity-90">
+              <a href={musicData.url} target="_blank" rel="noopener noreferrer">
+                <Download className="h-4 w-4" />
+                下载音乐
+              </a>
+            </Button>
           )}
           {musicData.url && (
-            <a
-              href={musicData.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-purple-700 text-white rounded-lg hover:bg-purple-800 transition-colors font-medium">
-              新窗口打开
-            </a>
+            <Button asChild variant="outline" className="gap-2">
+              <a href={musicData.url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                新窗口打开
+              </a>
+            </Button>
           )}
           {musicData.lyrics && (
-            <button
-              onClick={() => setShowLyrics(!showLyrics)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => setShowLyrics(!showLyrics)}>
+              <ChevronDown className="h-4 w-4" />
               {showLyrics ? "隐藏歌词" : "显示歌词"}
-            </button>
+            </Button>
           )}
         </div>
-      </div>
+      </Card>
 
       {showLyrics && musicData.lyrics && (
-        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4">
-          <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
-            歌词
-          </h3>
-          <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono">
+        <Card className="p-4">
+          <h3 className="text-base font-semibold text-primary mb-3">歌词</h3>
+          <pre className="whitespace-pre-wrap text-sm text-secondary font-mono">
             {musicData.lyrics}
           </pre>
-        </div>
+        </Card>
       )}
 
       {musicData.copyright && (
-        <div className="text-xs text-gray-500 dark:text-gray-400 mt-4 p-2 bg-gray-100 dark:bg-gray-700 rounded">
-          {musicData.copyright}
-        </div>
+        <p className="text-xs text-muted opacity-80 px-1">{musicData.copyright}</p>
       )}
-    </>
+    </div>
   );
 }

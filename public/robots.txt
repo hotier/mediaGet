@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://parse.shenzjd.com/sitemap.xml
+Sitemap: https://get.hotier.cc.cd/sitemap.xml

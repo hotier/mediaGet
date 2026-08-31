@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Footer from "@/components/Footer";
+import SiteHeader from "@/components/SiteHeader";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = {
@@ -88,40 +89,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className="scroll-smooth">
+    <html lang="zh-CN" className="scroll-smooth" suppressHydrationWarning>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <link rel="icon" type="image/svg+xml" href="https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260828-215653-2ha5.svg" />
-        <link rel="apple-touch-icon" href="https://cdn.jsdmirror.com/gh/wu529778790/img.shenzjd.com@master/blog/imgx-20260828-220754-822r.png" />
-        {/* 右侧悬浮公众号+赞赏码浮窗：@wu529778790/floating-qr Web Component 版
-            一行 <script> 引入，自动注册 <floating-qr> 并注入默认浮窗（right-center，
-            默认隐藏移动端、关闭后刷新重现），无需额外标签/JS */}
+        {/* 主题初始化：body 渲染前同步挂载 class，避免闪烁（FOUC） */}
         <script
-          src="https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js"
-          defer
-        />
-        {/* 顶部导航 + 头像浮窗：@wu529778790/site-navbar Web Component 版
-            1. 先引入 wx-auth-sdk UMD（不锁版本，跟随最新；头像登录依赖 window.WxAuth）
-            2. 弹窗样式随 SDK 版本走，需同步引入 wx-auth.css
-            3. 静默校验登录态（silent:true 绝不自动弹窗；required:false 弹窗带 × 关闭按钮）
-            4. 再引入 site-navbar（头像已内置，无需再引 user-avatar）
-            5. body 顶部放一个 <site-navbar> 标签即出现整条导航
-            解析主流程的登录弹窗由 src/lib/wx-auth-client.ts 复用同一全局实例触发 */}
-        <link
-          rel="stylesheet"
-          href="https://unpkg.com/wx-auth-sdk/dist/wx-auth.css"
-        />
-        <script src="https://unpkg.com/wx-auth-sdk/dist/wx-auth.umd.js" defer />
-        <script
-          defer
           dangerouslySetInnerHTML={{
-            __html: `WxAuth.init({ silent: true, required: false })`,
+            __html: `(function(){try{var t=localStorage.getItem("theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.add(d?"dark":"light");}catch(e){document.documentElement.classList.add("light");}})();`,
           }}
         />
-        <script
-          src="https://unpkg.com/@wu529778790/site-navbar@latest/dist/site-navbar.wc.js"
-          defer
-        />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+        <link rel="apple-touch-icon" href="/icon.png" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -141,9 +119,13 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased min-h-screen flex flex-col noise-overlay">
-        <site-navbar />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        {/* 全站 AI 感网格背景层 */}
+        <div className="aurora-grid" aria-hidden="true" />
+        <div className="relative flex min-h-screen flex-1 flex-col" style={{ zIndex: 1 }}>
+          <SiteHeader />
+          <main className="flex-1">{children}</main>
+          <Footer />
+        </div>
       </body>
     </html>
   );

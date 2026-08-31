@@ -1,7 +1,9 @@
 "use client";
 import React, { useState } from "react";
 import Image from "next/image";
+import { Download, Music, Play } from "lucide-react";
 import { buildVideoProxyUrl } from "@/utils/videoProxy";
+import { Button } from "@/components/ui/button";
 
 /**
  * 统一视频展示卡片（简化版）：上方封面图 + 下方「播放视频 / 下载视频」两个链接。
@@ -18,46 +20,19 @@ import { buildVideoProxyUrl } from "@/utils/videoProxy";
 
 type AccentKey = "blue" | "red" | "orange" | "pink" | "neutral" | "purple";
 
-const ACCENTS: Record<
-  AccentKey,
-  { gradient: string; hover: string; shadow: string }
-> = {
+const ACCENTS: Record<AccentKey, string> = {
   // B站 / 皮皮虾 / 皮皮搞笑
-  blue: {
-    gradient: "from-[#00aeec] to-[#4dc9ff]",
-    hover: "hover:from-[#0099d4] hover:to-[#3db8e8]",
-    shadow: "hover:shadow-[#00aeec]/25",
-  },
+  blue: "from-[#00aeec] to-[#4dc9ff]",
   // 微博
-  red: {
-    gradient: "from-[#e6162d] to-[#ff4d6a]",
-    hover: "hover:from-[#c91227] hover:to-[#e6162d]",
-    shadow: "hover:shadow-[#e6162d]/25",
-  },
+  red: "from-[#e6162d] to-[#ff4d6a]",
   // 快手
-  orange: {
-    gradient: "from-[#ff6600] to-[#ff9933]",
-    hover: "hover:from-[#e65c00] hover:to-[#ff8800]",
-    shadow: "hover:shadow-orange-500/25",
-  },
+  orange: "from-[#ff6600] to-[#ff9933]",
   // 小红书
-  pink: {
-    gradient: "from-[#ff2442] to-[#ff5c7c]",
-    hover: "hover:from-[#e61f3a] hover:to-[#ff4d6a]",
-    shadow: "hover:shadow-[#ff2442]/25",
-  },
+  pink: "from-[#ff2442] to-[#ff5c7c]",
   // 通用平台
-  neutral: {
-    gradient: "from-neutral-500 to-neutral-400",
-    hover: "hover:from-neutral-600 hover:to-neutral-500",
-    shadow: "hover:shadow-black/25",
-  },
+  neutral: "from-neutral-500 to-neutral-400",
   // QQ音乐
-  purple: {
-    gradient: "from-purple-500 to-pink-500",
-    hover: "hover:from-purple-600 hover:to-pink-600",
-    shadow: "hover:shadow-purple-500/25",
-  },
+  purple: "from-emerald-500 to-teal-500",
 };
 
 interface VideoPosterCardProps {
@@ -101,7 +76,7 @@ export default function VideoPosterCard({
   showPlay = true,
   inline = false,
 }: VideoPosterCardProps) {
-  const a = ACCENTS[accent];
+  const gradient = ACCENTS[accent];
   // 防盗链直链走代理，保证可播放、可下载
   const playUrl = buildVideoProxyUrl(url);
   // 内嵌播放状态
@@ -134,12 +109,7 @@ export default function VideoPosterCard({
             {/* 中心播放图标：提示用户可点击封面播放，hover 时轻微放大 */}
             <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/15 transition-colors duration-300">
               <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white/90 group-hover:bg-white text-black flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-110">
-                <svg
-                  className="w-7 h-7 sm:w-9 sm:h-9 ml-1"
-                  fill="currentColor"
-                  viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
+                <Play className="w-7 h-7 sm:w-9 sm:h-9 ml-1" fill="currentColor" />
               </div>
             </div>
           </div>
@@ -164,71 +134,42 @@ export default function VideoPosterCard({
       {/* 操作按钮：播放 / 下载（内嵌模式下封面点击即可播放，只保留下载按钮） */}
       <div className="flex flex-col sm:flex-row gap-3">
         {showPlay && !inline && (
-          <a
-            href={playUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`group inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r ${a.gradient} ${a.hover} text-white rounded-xl font-medium transition-all duration-300 ${a.shadow} hover:-translate-y-0.5 flex-1`}>
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-              />
-            </svg>
-            {playText}
-          </a>
+          <Button
+            asChild
+            variant="default"
+            size="lg"
+            className={`flex-1 bg-gradient-to-r ${gradient} hover:opacity-90`}>
+            <a href={playUrl} target="_blank" rel="noopener noreferrer">
+              <Play className="h-5 w-5" />
+              {playText}
+            </a>
+          </Button>
         )}
 
         {showDownload && (
-          <a
-            href={playUrl}
-            target={inline ? undefined : "_blank"}
-            rel={inline ? undefined : "noopener noreferrer"}
-            download={inline}
-            className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-glass-2 hover:bg-glass-3 text-primary rounded-xl font-medium transition-all duration-300 border border-border-subtle hover:-translate-y-0.5 flex-1">
-            <svg
-              className="w-5 h-5 transition-transform group-hover:scale-110"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
-            </svg>
-            {downloadText}
-          </a>
+          <Button asChild variant="outline" size="lg" className="flex-1">
+            <a
+              href={playUrl}
+              target={inline ? undefined : "_blank"}
+              rel={inline ? undefined : "noopener noreferrer"}
+              download={inline}>
+              <Download className="h-5 w-5" />
+              {downloadText}
+            </a>
+          </Button>
         )}
 
         {/* 音频下载：与视频下载同款式（中性描边），点击新窗口打开音频直链 */}
         {audioUrl && (
-          <a
-            href={audioUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex items-center justify-center gap-2 px-6 py-3 bg-glass-2 hover:bg-glass-3 text-primary rounded-xl font-medium transition-all duration-300 border border-border-subtle hover:-translate-y-0.5 flex-1">
-            <svg
-              className="w-5 h-5 transition-transform group-hover:scale-110"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-              />
-            </svg>
-            {audioText}
-          </a>
+          <Button asChild variant="outline" size="lg" className="flex-1">
+            <a
+              href={audioUrl}
+              target="_blank"
+              rel="noopener noreferrer">
+              <Music className="h-5 w-5" />
+              {audioText}
+            </a>
+          </Button>
         )}
       </div>
     </div>

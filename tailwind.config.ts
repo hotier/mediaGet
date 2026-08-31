@@ -6,9 +6,9 @@ const config: Config = {
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
-  // 跟随系统 prefers-color-scheme，与 globals.css 中 @media (prefers-color-scheme) 机制保持一致
-  // 注意：media 只能作为字符串，不能写成数组形式（数组仅支持 class/selector/variant）
-  darkMode: "media",
+  // class 策略：由 ThemeToggle / 初始化脚本在 <html> 上挂载 .dark / .light
+  // 所有主题色通过 CSS 变量切换（见 globals.css），dark: 变体按需可用
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
@@ -35,6 +35,19 @@ const config: Config = {
           medium: "var(--border-medium)",
           strong: "var(--border-strong)",
         },
+        /* shadcn/ui 语义色：映射到现有设计令牌，避免引入第二套配色 */
+        input: "var(--border-medium)",
+        ring: "var(--accent)",
+        success: "var(--success)",
+        error: "var(--error)",
+        destructive: {
+          DEFAULT: "var(--error)",
+          foreground: "#ffffff",
+        },
+      },
+      boxShadow: {
+        card: "var(--shadow-card)",
+        glow: "var(--shadow-glow)",
       },
       fontFamily: {
         sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],

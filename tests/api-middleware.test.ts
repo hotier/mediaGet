@@ -77,17 +77,17 @@ describe("api-middleware", () => {
     expect(parseSpy).not.toHaveBeenCalled();
   });
 
-  it("returns CORS header for allowed origin (*.shenzjd.com)", async () => {
+  it("returns CORS header for allowed origin (*.hotier.cc.cd)", async () => {
     vi.spyOn(apiUtils, "getCachedResponse").mockReturnValue(null);
     const parseSpy = vi.fn().mockResolvedValue({ code: 1, msg: "ok" });
     const handler = createApiHandler(parseSpy, { shouldCache: false });
 
     const req = new Request("http://127.0.0.1/api/test?url=https://example.com", {
-      headers: { Origin: "https://parse.shenzjd.com" },
+      headers: { Origin: "https://get.hotier.cc.cd" },
     });
     const res = await handler(req);
 
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://parse.shenzjd.com");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://get.hotier.cc.cd");
   });
 
   it("does not return CORS header for unauthorized origin", async () => {
@@ -120,8 +120,8 @@ describe("api-middleware", () => {
     expect(parseSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("returns honeypot (200 + 公众号宣传) for blacklisted IP instead of 403", async () => {
-    // 黑名单 IP 直连解析接口 → 不再 403，而是 200 + 结构化蜜罐数据（宣传公众号）
+  it("returns honeypot (200 + 演示文案) for blacklisted IP instead of 403", async () => {
+    // 黑名单 IP 直连解析接口 → 不再 403，而是 200 + 结构化蜜罐数据（演示文案）
     vi.spyOn(apiUtils, "getClientIP").mockReturnValue("120.42.187.174");
     const parseSpy = vi.fn();
     const handler = createApiHandler(parseSpy, { shouldCache: false });
@@ -133,10 +133,10 @@ describe("api-middleware", () => {
     expect(parseSpy).not.toHaveBeenCalled();
     const json = await res.json();
     expect(json.code).toBe(200);
-    // 蜜罐标志 + 宣传文案 + 引导链接
+    // 蜜罐标志 + 演示文案 + 引导链接
     expect(json.data.honeypot).toBe(true);
-    expect(json.msg).toContain("神族九帝");
-    expect(json.data.url).toContain("parse.shenzjd.com");
+    expect(json.msg).toContain("演示内容");
+    expect(json.data.url).toContain("get.hotier.cc.cd");
   });
 
   it("allows non-blacklisted IP through (regression)", async () => {

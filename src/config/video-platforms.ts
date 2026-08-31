@@ -5,14 +5,14 @@ export const VIDEO_PLATFORMS = {
     emoji: "🎵",
     color: "#fe2c55",
     gradient: "from-[#fe2c55] to-[#ff6b8a]",
-    logo: "/logos/douyin.png",
+    logo: "/logos/douyin.svg",
   },
   bilibili: {
     name: "哔哩哔哩",
     emoji: "🅱️",
     color: "#00aeec",
     gradient: "from-[#00aeec] to-[#4dc9ff]",
-    logo: "/logos/bilibili.png",
+    logo: "/logos/bilibili.svg",
   },
   kuaishou: {
     name: "快手",
@@ -39,13 +39,14 @@ export const VIDEO_PLATFORMS = {
     emoji: "📝",
     color: "#ff2442",
     gradient: "from-[#ff2442] to-[#ff5c7c]",
-    logo: "/logos/xiaohongshu.png",
+    logo: "/logos/xiaohongshu.svg",
   },
   qsmusic: {
     name: "汽水音乐",
     emoji: "🎧",
     color: "#00c9b7",
     gradient: "from-[#00c9b7] to-[#00e5d4]",
+    logo: "/logos/qsmusic.svg",
   },
   pipigx: {
     name: "皮皮搞笑",
@@ -59,13 +60,14 @@ export const VIDEO_PLATFORMS = {
     emoji: "🦐",
     color: "#ff6b6b",
     gradient: "from-[#ff6b6b] to-[#ff8787]",
-    logo: "/logos/pipixia.png",
+    logo: "/logos/pipixia.svg",
   },
   huoshan: {
     name: "火山",
     emoji: "🌋",
     color: "#ff4757",
     gradient: "from-[#ff4757] to-[#ff6b81]",
+    logo: "/logos/huoshan.svg",
   },
   weishi: {
     name: "微视",
@@ -103,6 +105,7 @@ export const VIDEO_PLATFORMS = {
     emoji: "🐯",
     color: "#ff9f1a",
     gradient: "from-[#ff9f1a] to-[#ffbf69]",
+    logo: "/logos/huya.svg",
   },
   acfun: {
     name: "AcFun",
@@ -151,14 +154,14 @@ export const VIDEO_PLATFORMS = {
     emoji: "𝕏",
     color: "#14171a",
     gradient: "from-[#14171a] to-[#657786]",
-    logo: "/logos/x.svg",
+    logo: "/logos/x-white.svg",
   },
   tiktok: {
     name: "TikTok",
     emoji: "🎶",
     color: "#010101",
     gradient: "from-[#010101] to-[#25f4ee]",
-    logo: "/logos/tiktok.png",
+    logo: "/logos/tiktok-white.svg",
   },
 } as const;
 

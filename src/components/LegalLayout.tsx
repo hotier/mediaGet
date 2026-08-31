@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
+import { Card } from "@/components/ui/card";
 
-// 法律页面共享布局：与首页视觉风格一致（morphing-bg + glass-card）
+// 法律页面共享布局：与首页视觉风格一致（morphing-bg + Card）
 // 排版样式通过 Tailwind 任意变体集中定义，无需改 globals.css
 const proseClass = [
   "leading-relaxed text-sm text-secondary",
@@ -41,22 +42,19 @@ export default function LegalLayout({
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           {/* Header */}
           <header className="mb-8">
-            <h1 className="text-2xl sm:text-3xl font-bold mb-2 glow-text">
-              <span className="gradient-text">{title}</span>
+            <h1 className="text-2xl sm:text-3xl font-bold mb-2 tracking-tight">
+              {title}
             </h1>
             {subtitle && (
               <p className="text-sm text-muted max-w-md">{subtitle}</p>
             )}
-            <p className="text-xs text-muted/50 mt-3">
+            <p className="text-xs text-muted opacity-80 mt-3">
               最近更新：{lastUpdated}
             </p>
           </header>
 
           {/* Content */}
-          <article
-            className={`glass-card iridescent-border p-6 sm:p-10 ${proseClass}`}>
-            {children}
-          </article>
+          <Card className={`p-6 sm:p-10 ${proseClass}`}>{children}</Card>
         </div>
       </div>
     </>

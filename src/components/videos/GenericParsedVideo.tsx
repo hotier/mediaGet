@@ -3,17 +3,28 @@ import React from "react";
 import Image from "next/image";
 import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
+import ParseInfoPanel from "./ParseInfoPanel";
+import CaptionBox from "./CaptionBox";
+import { Card } from "@/components/ui/card";
 
 interface GenericParsedVideoProps {
   data: ApiResponse;
+  /** 平台 key，供信息面板按平台展示字段 */
+  platform?: string;
 }
 
-export default function GenericParsedVideo({ data }: GenericParsedVideoProps) {
+export default function GenericParsedVideo({
+  data,
+  platform,
+}: GenericParsedVideoProps) {
   if (!data.data) {
     return null;
   }
 
   const d = data.data as ParseData;
+  // 未显式传入 platform 时，回退到响应里的 platform 字段
+  // （统一渲染注册表只传 data，保证平台感知的字段表仍能命中）
+  const effectivePlatform = platform ?? data.platform;
   // 视频/图片一律直链 + 窗口展示（不再直接 <video> 播放、不再走 /api/proxy）
   // type=image 时 url 指向图片直链，不能再按视频卡片渲染（避免封面比例错位 + 伪播放按钮）
   const images = d.images?.filter(Boolean) || [];
@@ -23,7 +34,7 @@ export default function GenericParsedVideo({ data }: GenericParsedVideoProps) {
 
   return (
     <div className="space-y-5" style={{ touchAction: "pan-y" }}>
-      <div className="glass-card p-5">
+      <Card className="p-5">
         <div className="flex items-center gap-4">
           {d.avatar && (
             <Image
@@ -46,7 +57,13 @@ export default function GenericParsedVideo({ data }: GenericParsedVideoProps) {
             )}
           </div>
         </div>
-      </div>
+      </Card>
+
+      {/* 作品信息：作者 / 作者ID / 内容类型 / 发布时间 */}
+      <ParseInfoPanel data={d} platform={effectivePlatform} title="作品信息" />
+
+      {/* 文案：视频信息与下载按钮之间，可一键复制 */}
+      {d.desc && <CaptionBox text={d.desc} title="文案" />}
 
       {videoUrl && (
         <VideoPosterCard
@@ -102,12 +119,13 @@ export default function GenericParsedVideo({ data }: GenericParsedVideoProps) {
 
       {/* 纯文字内容（无媒体）：展示提示而非空白 */}
       {isText && (
-        <div className="glass-card p-6 text-center">
+        <Card className="p-6 text-center">
           <p className="text-sm text-muted leading-relaxed">
             该内容仅包含文字，无可下载的视频或图片
           </p>
-        </div>
+        </Card>
       )}
+
     </div>
   );
 }

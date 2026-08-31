@@ -31,8 +31,8 @@ const MONOGRAM: Partial<Record<VideoPlatformKey, string>> = {
 
 /**
  * 平台图标，优先级：
- * 1) logo 为真实彩色 PNG（参考站同款）→ 直接展示原图
- * 2) logo 为白标 SVG（simple-icons，注入白填充）→ 铺在品牌色块上
+ * 1) logo 为真实彩色（PNG / 非 -white 的 SVG 官方彩色图标）→ 直接展示原图
+ * 2) logo 为白标 SVG（文件名含 -white，simple-icons 白色填充）→ 铺在品牌色块上
  * 3) 都没有 → 品牌色块 + 文字回退
  */
 export default function PlatformIcon({
@@ -53,9 +53,11 @@ export default function PlatformIcon({
   const logo = cfg.logo;
   const isPng = !!logo && /\.png$/i.test(logo);
   const isSvg = !!logo && /\.svg$/i.test(logo);
+  // 白标 SVG：文件名约定 -white.svg（simple-icons 单色白标，需铺品牌色块）
+  const isWhiteSvg = isSvg && /-white\.svg$/i.test(logo);
 
-  // 1) 真实彩色 PNG：直接展示原图（透明/彩色背景自适应深色站点）
-  if (isPng) {
+  // 1) 真实彩色（PNG / 彩色官方 SVG）：直接展示原图
+  if (isPng || (isSvg && !isWhiteSvg)) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -71,7 +73,7 @@ export default function PlatformIcon({
   }
 
   // 2) 白标 SVG：铺在品牌色块上（fill=#fff）
-  if (isSvg) {
+  if (isWhiteSvg) {
     return (
       <span
         className={`inline-grid shrink-0 place-items-center ${rounded} ${className}`}

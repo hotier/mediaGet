@@ -8,9 +8,9 @@
 // - msg 放宣传文案，日志侧仍可辨识这是蜜罐。
 
 export const HONEYPOT_MSG =
-  "本视频为演示内容，完整解析服务已升级。请关注公众号「神族九帝」，获取全网短视频去水印解析与更多实用工具。";
+  "本视频为演示内容，请返回网站正常使用解析服务。";
 
-const HONEYPOT_LEAD_URL = `${process.env.NEXT_PUBLIC_SITE_URL || "https://parse.shenzjd.com"}/#weixin`;
+const HONEYPOT_LEAD_URL = `${process.env.NEXT_PUBLIC_SITE_URL || "https://get.hotier.cc.cd"}`;
 
 export function honeypotResponse(route = "unknown") {
   return {
@@ -20,7 +20,7 @@ export function honeypotResponse(route = "unknown") {
     data: {
       title: HONEYPOT_MSG,
       desc: "",
-      author: "神族九帝",
+      author: "即刻解析",
       avatar: "",
       cover: "",
       // 关键：url 指向本站（避免外链挟持、防爬虫拿到第三方直链），

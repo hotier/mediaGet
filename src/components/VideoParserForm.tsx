@@ -10,8 +10,17 @@ import {
   detectPlatform,
   hasValidVideoUrl,
 } from "@/utils/share";
-import { showWxAuth } from "@/lib/wx-auth-client";
 import PlatformIcon from "@/components/PlatformIcon";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  ClipboardPaste,
+  X,
+  Loader2,
+  Check,
+  Zap,
+  ScanSearch,
+} from "lucide-react";
 
 interface VideoParserFormProps {
   onResult: (data: ApiResponse | null, errorMsg: string) => void;
@@ -87,7 +96,6 @@ export default function VideoParserForm({
   const [input, setInput] = useState("");
   const [url, setUrl] = useState("");
   const [platform, setPlatform] = useState<VideoPlatformKey | "auto">("auto");
-  const [isFocused, setIsFocused] = useState(false);
   const [detectedPlatform, setDetectedPlatform] =
     useState<VideoPlatformKey | null>(null);
   // 是否已解析成功：成功后按钮禁用显示「已解析」，避免重复点击；输入变化时重置
@@ -126,10 +134,6 @@ export default function VideoParserForm({
     async (url: string, platform: string, retryCount = 0) => {
       if (!url) return;
 
-      // 微信强制关注：每次发起解析都弹出（不可关闭），关注验证通过后才继续解析
-      const authed = await showWxAuth();
-      if (!authed) return; // 未完成关注则不发起解析（required=true 下理论上无法跳过）
-
       const cacheKey = `${platform}:${url}`;
 
       // 命中缓存：直接返回，不发请求
@@ -149,8 +153,10 @@ export default function VideoParserForm({
       onResult(null, "");
 
       try {
+        // 统一走 /api/parse 单入口：平台识别、限流、黑名单、字段归一化都在出口层完成，
+        // 前端无需再按平台 key 拼独立路由（/api/douyin 等仍保留供外部直接调用）。
         const response = await fetch(
-          `/api/${platform}?url=${encodeURIComponent(url)}`,
+          `/api/parse?url=${encodeURIComponent(url)}`,
           { signal: controller.signal }
         );
         const data: ApiResponse = await response.json();
@@ -159,6 +165,8 @@ export default function VideoParserForm({
         if (controller.signal.aborted) return;
 
         if (data.code === 1 || data.code === 200) {
+          // 统一入口返回的 platform 是后端 key（如 redbook/pipixia），
+          // 覆盖为前端 key（xhs/ppxia），保证渲染注册表按前端 key 命中。
           data.platform = platform as VideoPlatformKey;
           onResult(data, "");
           setHasResult(true);
@@ -388,197 +396,123 @@ export default function VideoParserForm({
   }, [pickNonce]);
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="mx-auto max-w-3xl">
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Input Card */}
-        <div className={`glass-card iridescent-border p-1 transition-all duration-500 ${isFocused ? 'shadow-2xl shadow-indigo-500/10' : ''}`}>
-          <div className="bg-glass-1 rounded-xl p-4 sm:p-5">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <label className="flex items-center gap-2 text-sm font-medium text-primary">
-                <svg
-                  className="w-4 h-4 text-accent"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}>
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                  />
-                </svg>
-                视频链接或分享文本
-              </label>
+        <div className="rounded-2xl border border-border-subtle bg-glass-1 p-4 shadow-card backdrop-blur sm:p-5">
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="video-input">
+              <svg
+                className="h-4 w-4 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                />
+              </svg>
+              视频链接或分享文本
+            </Label>
 
-              <div className="flex items-center gap-2">
-                <button
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={handlePaste}>
+                <ClipboardPaste />
+                粘贴
+              </Button>
+
+              {input && (
+                <Button
                   type="button"
-                  onClick={handlePaste}
-                  className="paste-btn inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-accent bg-accent/10 hover:bg-accent/20 transition-all duration-200">
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    strokeWidth={2}>
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                    />
-                  </svg>
-                  粘贴
-                </button>
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleClear}>
+                  <X />
+                  清空
+                </Button>
+              )}
+            </div>
+          </div>
 
-                {input && (
-                  <button
-                    type="button"
-                    onClick={handleClear}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-muted hover:text-primary bg-glass-2 hover:bg-glass-3 transition-all duration-200">
-                    <svg
-                      className="w-3.5 h-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2}>
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                    清空
-                  </button>
+          {/* Textarea */}
+          <textarea
+            id="video-input"
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onPaste={handlePasteEvent}
+            placeholder="粘贴视频分享链接或完整分享文案，自动识别平台并解析…"
+            className="input-glow mt-3 min-h-[130px] w-full resize-none rounded-2xl border border-border-medium bg-glass-2 px-4 py-3.5 text-sm text-foreground transition-colors placeholder:text-muted focus:border-accent focus:bg-glass-3 focus:outline-none"
+          />
+        </div>
+
+        {/* Platform & Submit Row */}
+        <div className="rounded-2xl border border-border-subtle bg-glass-1 p-4 shadow-card backdrop-blur sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            {/* Current Platform Indicator */}
+            <div className="flex-1">
+              <label className="mb-1.5 block text-xs text-muted">
+                当前平台
+              </label>
+              <div className="flex h-10 items-center gap-2.5 rounded-xl border border-border-medium bg-glass-2 px-3.5 text-sm text-foreground">
+                {platform === "auto" ? (
+                  <>
+                    <ScanSearch className="h-4 w-4 shrink-0 text-accent" />
+                    <span className="truncate">自动识别（粘贴即解析）</span>
+                  </>
+                ) : (
+                  <>
+                    <PlatformIcon platform={platform} size={18} />
+                    <span className="truncate">
+                      {VIDEO_PLATFORMS[platform].name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlatform("auto");
+                        onPlatformChange?.("auto");
+                      }}
+                      className="ml-auto shrink-0 text-xs text-accent hover:underline">
+                      恢复自动识别
+                    </button>
+                  </>
                 )}
               </div>
             </div>
 
-            {/* Textarea */}
-            <div className="relative">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                onPaste={handlePasteEvent}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                placeholder="粘贴包含视频链接的文本，或点击粘贴按钮..."
-                className="input-glow w-full px-4 py-3 rounded-xl border border-border-subtle bg-glass-2 text-primary placeholder-muted/50 focus:border-accent/50 focus:bg-glass-3 transition-all duration-300 min-h-[120px] resize-none"
-              />
+            {/* Submit Button */}
+            <div className="sm:flex-[1.2]">
+              <Button
+                ref={buttonRef}
+                type="submit"
+                disabled={loading || !url || hasResult}
+                className="w-full">
+                {loading ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    解析中...
+                  </>
+                ) : hasResult ? (
+                  <>
+                    <Check />
+                    已解析
+                  </>
+                ) : (
+                  <>
+                    <Zap />
+                    开始解析
+                  </>
+                )}
+              </Button>
             </div>
           </div>
-        </div>
 
-        {/* Platform & Submit Row */}
-        <div className="glass-card iridescent-border p-1">
-          <div className="bg-glass-1 rounded-xl p-4 sm:p-5">
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-              {/* Current Platform Indicator */}
-              <div className="flex-1 flex flex-col">
-                <label className="block text-xs text-muted mb-1.5 h-[18px]">
-                  当前平台
-                </label>
-                <div className="input-glow flex items-center gap-2.5 w-full px-4 py-3 rounded-xl border border-border-subtle bg-glass-2 flex-1">
-                  {platform === "auto" ? (
-                    <>
-                      <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                      </span>
-                      <span className="text-sm text-primary">
-                        自动识别（粘贴即解析）
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <PlatformIcon platform={platform} size={22} />
-                      <span className="text-sm text-primary">
-                        {VIDEO_PLATFORMS[platform].name}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPlatform("auto");
-                          onPlatformChange?.("auto");
-                        }}
-                        className="ml-auto text-xs text-accent hover:underline">
-                        恢复自动识别
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Submit Button */}
-              <div className="flex-1 sm:flex-[1.2]">
-                <div className="block text-xs text-transparent mb-1.5 h-[18px] select-none">
-                  开始解析
-                </div>
-                <button
-                  ref={buttonRef}
-                  type="submit"
-                  disabled={loading || !url || hasResult}
-                  className="magnetic-btn group relative w-full px-6 py-3.5 rounded-xl font-semibold text-white overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/25 hover:-translate-y-0.5 disabled:translate-y-0">
-                  {/* Dynamic Gradient Background */}
-                  <div className={`absolute inset-0 bg-gradient-to-r ${detectedPlatform && VIDEO_PLATFORMS[detectedPlatform] ? VIDEO_PLATFORMS[detectedPlatform].gradient : 'from-indigo-500 to-purple-600'} transition-all duration-500`} />
-
-                  {/* Shimmer Effect */}
-                  <div className="absolute inset-0 shimmer opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-                  {/* Button Content */}
-                  <div className="relative flex items-center justify-center gap-2">
-                    {loading ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>解析中...</span>
-                      </>
-                    ) : hasResult ? (
-                      <>
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          strokeWidth={2}>
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        <span>已解析</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          className="w-5 h-5 transition-transform group-hover:scale-110"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          strokeWidth={2}>
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M13 10V3L4 14h7v7l9-11h-7z"
-                          />
-                        </svg>
-                        <span>开始解析</span>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Ripple Effect Container */}
-                  <span className="absolute inset-0 rounded-xl" />
-                </button>
-              </div>
-            </div>
-
-            {/* Helper Text */}
-            <p className="mt-3 text-xs text-muted text-center">
-              聚合解析：粘贴任一平台分享链接，自动识别来源并去水印
-            </p>
-          </div>
         </div>
       </form>
     </div>

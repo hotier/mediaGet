@@ -254,14 +254,14 @@ export const isBlockedIP = (ip) => {
   return BLOCKED_IPS.has(first);
 };
 
-// CORS 头生成 — 仅允许 *.shenzjd.com
-const ALLOWED_ORIGIN_SUFFIX = '.shenzjd.com';
+// CORS 头生成 — 仅允许 *.hotier.cc.cd
+const ALLOWED_ORIGIN_SUFFIX = '.hotier.cc.cd';
 
 export const getCorsHeaders = (origin) => {
   if (!origin || typeof origin !== 'string') return {};
   try {
     const hostname = new URL(origin).hostname.toLowerCase();
-    if (hostname === 'shenzjd.com' || hostname.endsWith(ALLOWED_ORIGIN_SUFFIX)) {
+    if (hostname === 'hotier.cc.cd' || hostname.endsWith(ALLOWED_ORIGIN_SUFFIX)) {
       return { 'Access-Control-Allow-Origin': origin };
     }
   } catch {

@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Play } from "lucide-react";
 import { VIDEO_PLATFORMS } from "@/config/video-platforms";
 import { getPlatformSeo } from "@/config/seo-platforms";
 import { siteConfig } from "@/config/site";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 // 静态生成全部平台页
 export const dynamicParams = false;
@@ -48,7 +51,7 @@ export async function generateMetadata({
 
 const steps = [
   "复制视频分享链接或完整分享文案（短链、视频页链接均可）",
-  "打开神族九帝，把链接粘贴到输入框",
+  `打开${siteConfig.name}，把链接粘贴到输入框`,
   "点击解析，即可预览并下载无水印视频",
 ];
 
@@ -77,18 +80,18 @@ export default async function PlatformPage({
       <div className="relative" style={{ zIndex: 1 }}>
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           {/* Breadcrumb */}
-          <nav className="text-xs text-muted/70 mb-6" aria-label="面包屑">
+          <nav className="text-xs text-muted mb-6" aria-label="面包屑">
             <Link href="/" className="hover:text-accent transition-colors">
               首页
             </Link>
-            <span className="mx-2 text-muted/40">/</span>
+            <span className="mx-2 text-muted opacity-50">/</span>
             <span>{platform.name}视频解析</span>
           </nav>
 
           {/* Header */}
           <header className="mb-8">
-            <h1 className="text-2xl sm:text-3xl font-bold mb-2 glow-text">
-              <span className="gradient-text">{seo.title}</span>
+            <h1 className="text-2xl sm:text-3xl font-bold mb-2 tracking-tight">
+              {seo.title}
             </h1>
             <p className="text-sm text-muted max-w-xl leading-relaxed">
               {seo.description}
@@ -96,19 +99,20 @@ export default async function PlatformPage({
           </header>
 
           {/* CTA */}
-          <div className="glass-card iridescent-border p-6 mb-8">
-            <p className="text-sm text-primary font-medium mb-3">
-              👇 粘贴链接，立即免费解析
+          <Card className="p-6 mb-8">
+            <p className="text-sm text-primary font-medium mb-4">
+              粘贴链接，立即免费解析
             </p>
-            <Link
-              href="/"
-              className="inline-block px-6 py-3 rounded-xl bg-gradient-to-r from-[#7f77dd] to-[#d4537e] text-white text-sm font-medium hover:opacity-90 transition-opacity">
-              去首页解析 {platform.name}视频
-            </Link>
-          </div>
+            <Button asChild className="gap-2">
+              <Link href="/">
+                <Play className="h-4 w-4" />
+                去首页解析 {platform.name}视频
+              </Link>
+            </Button>
+          </Card>
 
           {/* Content */}
-          <article className="glass-card iridescent-border p-6 sm:p-8 space-y-8">
+          <Card className="p-6 sm:p-8 space-y-8">
             {/* Intro */}
             <section>
               <h2 className="text-base sm:text-lg font-semibold text-primary mb-3">
@@ -176,10 +180,10 @@ export default async function PlatformPage({
                 ))}
               </div>
             </section>
-          </article>
+          </Card>
 
           {/* Disclaimer */}
-          <p className="text-xs text-muted/50 mt-6 leading-relaxed">
+          <p className="text-xs text-muted opacity-80 mt-6 leading-relaxed">
             免责声明：本工具仅用于技术学习与个人素材整理，不存储、不传播任何受版权保护的内容，
             解析结果版权归原平台及原作者所有，请勿用于商业或侵权用途。
           </p>

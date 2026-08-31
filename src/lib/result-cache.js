@@ -23,7 +23,7 @@ const TTL_SECONDS = 24 * 60 * 60;
 /** 内存兜底上限（非 Workers 环境），防本地长跑内存膨胀 */
 const MEMORY_MAX = 500;
 // 合成缓存源：仅作 Cache API 的 key，从不真实请求
-const CACHE_KEY_BASE = "https://result-cache.parse.shenzjd.com/api/parse?url=";
+const CACHE_KEY_BASE = "https://result-cache.get.hotier.cc.cd/api/parse?url=";
 
 const memoryCache = new Map(); // url → { result, expiresAt }
 

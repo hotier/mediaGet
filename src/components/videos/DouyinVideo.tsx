@@ -3,7 +3,12 @@ import React, { useState } from "react";
 import Image from "next/image";
 import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
+import ParseInfoPanel from "./ParseInfoPanel";
+import CaptionBox from "./CaptionBox";
 import { downloadAllImages } from "@/utils/downloadImages";
+import { Download, Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface DouyinVideoProps {
   data: ApiResponse;
@@ -19,6 +24,8 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
   const douyinData = data.data as ParseData;
   const isImageType = douyinData.type === "image";
   const images = douyinData.images?.filter(Boolean) || [];
+  // 文案：desc 优先（完整描述），缺失时回退 title
+  const caption = douyinData.desc || douyinData.title;
 
   const handleDownloadAll = async () => {
     if (downloading || images.length === 0) return;
@@ -48,7 +55,7 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
 
       {/* Image Gallery：单图全宽展示，多图网格（手机 2 列 / 桌面 3 列），点击打开原图 */}
       {isImageType && images.length > 0 && (
-        <div className="glass-card p-3">
+        <Card className="p-3">
           {images.length === 1 ? (
             <a
               href={images[0]}
@@ -89,53 +96,42 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
           )}
 
           {/* 一键下载全部图片 */}
-          <button
+          <Button
             type="button"
             onClick={handleDownloadAll}
             disabled={downloading}
-            className="mt-3 inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white rounded-xl bg-gradient-to-r from-[#ff6600] to-[#ff9933] hover:from-[#e65c00] hover:to-[#ff8800] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
+            size="lg"
+            className="mt-3 w-full bg-gradient-to-r from-[#ff6600] to-[#ff9933] hover:opacity-90">
             {downloading ? (
               <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 正在下载...
               </>
             ) : (
               <>
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}>
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-                  />
-                </svg>
+                <Download className="h-4 w-4" />
                 一键下载全部图片（{images.length} 张）
               </>
             )}
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {/* Image type hint */}
       {isImageType && (
-        <div className="glass-card p-3 flex items-center gap-2 text-xs text-muted">
+        <Card className="p-3 flex items-center gap-2 text-xs text-muted">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span>当前显示为静态图，动图/实况图的动画效果暂不支持</span>
-        </div>
+        </Card>
       )}
 
-      {/* Video Info */}
-      {douyinData.title && (
-        <div className="glass-card p-4">
-          <p className="text-sm text-muted line-clamp-2">{douyinData.title}</p>
-        </div>
-      )}
+      {/* 文案：视频信息与下载按钮之间，可一键复制 */}
+      {caption && <CaptionBox text={caption} title="文案" />}
+
+      {/* 作品信息：作者 / 抖音号 / 点赞 / 发布时间 / 时长 / 背景音乐 */}
+      <ParseInfoPanel platform="douyin" data={douyinData} title="视频信息" />
     </div>
   );
 }
