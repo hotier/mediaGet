@@ -61,6 +61,54 @@ const nextConfig = {
         protocol: "http",
         hostname: "i0.hdslb.com",
       },
+      {
+        protocol: "https",
+        hostname: "**.yximgs.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.yximgs.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.kwimgs.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.kwimgs.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.xhscdn.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.xhscdn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.sinaimg.cn",
+      },
+      {
+        protocol: "http",
+        hostname: "**.sinaimg.cn",
+      },
+      {
+        protocol: "https",
+        hostname: "**.pstatp.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.pstatp.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.byteimg.com",
+      },
+      {
+        protocol: "http",
+        hostname: "**.byteimg.com",
+      },
     ],
   },
   experimental: {

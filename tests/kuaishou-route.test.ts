@@ -99,4 +99,42 @@ describe("kuaishou route fallback", () => {
     expect(json.code).toBe(200);
     expect(json.data.photoUrl).toBe("https://v23-3.kwaicdn.com/upic/y.mp4");
   });
+
+  it("头像走站内代理：保留 _s 变体、携带 CDN fallback、不外泄内部字段", async () => {
+    vi.spyOn(kuaishouCore, "parseKuaishou").mockResolvedValue({
+      code: 200,
+      msg: "解析成功",
+      data: {
+        photoUrl: "https://v.kwaicdn.com/x.mp4",
+        authorAvatar:
+          "https://p2-pro.a.yximgs.com/uhead/AB/2022/09/14/14/x==_s.jpg",
+        authorAvatarFallbacks: [
+          "https://p1-pro.a.yximgs.com/uhead/AB/2022/09/14/14/x==_s.jpg",
+        ],
+        coverUrl: "https://p5.a.yximgs.com/upic/x.jpg",
+        source: "main",
+      },
+      platform: "kuaishou",
+    });
+
+    // 注意：createApiHandler 对同 URL 有进程内缓存，须用与其它用例不同的链接
+    const res = await GET(
+      makeRequest("https://www.kuaishou.com/short-video/avatar-fallback")
+    );
+    const json = await res.json();
+
+    expect(json.code).toBe(200);
+    // 头像必须走站内代理
+    expect(json.data.authorAvatar).toContain("/api/image?url=");
+    // 必须保留 _s 变体（uhead 上 _c/_b/原图变体实测 404，替换会导致破图）
+    expect(json.data.authorAvatar).toContain("_s.jpg");
+    expect(json.data.authorAvatar).not.toContain("_c.jpg");
+    // CDN 备选必须传给代理（主节点如 p2-pro 可能 DNS 失效）
+    expect(json.data.authorAvatar).toContain("&fallback=");
+    expect(json.data.authorAvatar).toContain("p1-pro.a.yximgs.com");
+    // 内部字段不对外暴露
+    expect(json.data.authorAvatarFallbacks).toBeUndefined();
+    // 封面同样走代理
+    expect(json.data.coverUrl).toContain("/api/image?url=");
+  });
 });

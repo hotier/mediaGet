@@ -16,7 +16,9 @@ const FIELD_SOURCES: Record<string, string[]> = {
   desc: ["desc", "description"],
   author: ["author", "authorName", "actorNick"],
   authorId: ["authorId", "authorID", "uid"],
+  sign: ["sign", "authorSign", "userSign"],
   cover: ["cover", "coverUrl", "imgurl", "poster", "videoCover", "thumbnail"],
+  avatar: ["avatar", "authorAvatar", "headUrl", "user_img"],
   url: ["url", "photoUrl", "video", "videoUrl", "playUrl", "mp4Url"],
 };
 
@@ -87,7 +89,11 @@ function normalizeBilibili(
       durationFormat: hasValue(item.durationFormat)
         ? (item.durationFormat as string)
         : undefined,
+      cover: hasValue(item.pic) ? (item.pic as string) : undefined,
       accept: Array.isArray(item.accept) ? item.accept : undefined,
+      qualities: Array.isArray(item.qualities)
+        ? (item.qualities as ParsedVideoItem["qualities"])
+        : undefined,
     }))
     .filter((v) => v.url);
 
@@ -100,9 +106,35 @@ function normalizeBilibili(
     data: {
       title: hasValue(result.title) ? (result.title as string) : undefined,
       desc: hasValue(result.desc) ? (result.desc as string) : undefined,
+      // 顶层 url：统一契约要求 data.url 可直接消费（B 站原始返回无顶层 url，
+      // 取第一分P直链兜底），iOS 快捷指令等轻量调用方无需再解析 videos
+      url: hasValue(result.url)
+        ? (result.url as string)
+        : hasValue(videos[0]?.url)
+          ? (videos[0]?.url as string)
+          : undefined,
       cover: hasValue(result.imgurl) ? (result.imgurl as string) : undefined,
       author: hasValue(user.name) ? (user.name as string) : undefined,
+      authorId: hasValue(user.uid) ? (user.uid as string) : undefined,
+      authorUrl: hasValue(user.authorUrl) ? (user.authorUrl as string) : undefined,
       avatar: hasValue(user.user_img) ? (user.user_img as string) : undefined,
+      sign: hasValue(user.sign) ? (user.sign as string) : undefined,
+      followingCount: hasValue(user.followingCount)
+        ? Number(user.followingCount)
+        : undefined,
+      followerCount: hasValue(user.followerCount)
+        ? Number(user.followerCount)
+        : undefined,
+      totalFavorited: hasValue(user.totalFavorited)
+        ? Number(user.totalFavorited)
+        : undefined,
+      time: hasValue(result.pubdate) ? Number(result.pubdate) : undefined,
+      duration: hasValue(result.duration) ? Number(result.duration) : undefined,
+      tname: hasValue(result.tname) ? (result.tname as string) : undefined,
+      copyright: hasValue(result.copyright)
+        ? Number(result.copyright)
+        : undefined,
+      stat: (result.stat as ParseData["stat"]) || undefined,
       videos,
     },
   };

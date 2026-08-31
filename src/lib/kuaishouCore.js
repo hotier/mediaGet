@@ -29,6 +29,12 @@ class KuaishouParser {
 
     this.urlPatterns = [
       {
+        // 快手短链/分享页重定向到 chenzhongtech H5 页，直接抓该页面（含作者简介与粉丝数据）
+        name: "chenzhongtech-photo",
+        regex: /chenzhongtech\.com\/fw\/photo\/[^?]+/,
+        template: (_videoId, redirectUrl) => redirectUrl,
+      },
+      {
         name: "short-video",
         regex: /short-video\/([^?]+)/,
         template: (videoId) =>
@@ -129,7 +135,11 @@ class KuaishouParser {
         const result = await this.parseWithDOM(htmlContent, domParser);
         if (result) return result;
       }
-      let result = this.parseApolloStateRegex(htmlContent);
+      // 快手 H5 分享页当前把数据放在 window.INIT_STATE（键名混淆，值为明文 Apollo 缓存），
+      // 直接解析该 JSON 可拿到作者/头像/统计/时长/发布时间等完整信息，优先使用。
+      let result = this.parseInitState(htmlContent);
+      if (result) return result;
+      result = this.parseApolloStateRegex(htmlContent);
       if (result) return result;
       result = this.parseInlineJsonData(htmlContent);
       if (result) return result;
@@ -157,6 +167,207 @@ class KuaishouParser {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 解析 window.INIT_STATE（快手 H5 分享页主数据源，键名被混淆、值为明文 Apollo 缓存）。
+   * 可提取：视频直链 / 封面 / 文案 / 作者名 / 头像 / 点赞 / 播放 / 评论 / 分享 / 时长 / 发布时间。
+   */
+  parseInitState(htmlContent) {
+    try {
+      const marker = "window.INIT_STATE = ";
+      const startIdx = htmlContent.indexOf(marker);
+      if (startIdx === -1) return null;
+      const braceIdx = htmlContent.indexOf("{", startIdx);
+      if (braceIdx === -1) return null;
+      const jsonStr = this.extractBalancedJson(htmlContent, braceIdx);
+      if (!jsonStr) return null;
+      let state;
+      try {
+        state = JSON.parse(jsonStr);
+      } catch {
+        try {
+          state = JSON.parse(this.cleanJsonString(jsonStr));
+        } catch {
+          return null;
+        }
+      }
+      const found = this.findPhotoDeep(state);
+      if (!found) return null;
+      const photo = found.photo;
+      const videoData = this.extractVideoFromPhoto(photo);
+      if (!videoData.photoUrl) return null;
+      // 作者关注/粉丝/作品数：photo 缓存项顶层的 counts 与作者 ownerCount 一致
+      if (found.counts && typeof found.counts === "object") {
+        if (found.counts.fanCount !== undefined) {
+          videoData.followerCount = found.counts.fanCount;
+        }
+        if (found.counts.followCount !== undefined) {
+          videoData.followingCount = found.counts.followCount;
+        }
+        if (found.counts.photoCount !== undefined) {
+          videoData.worksCount = found.counts.photoCount;
+        }
+      }
+      // 补充作者简介：INIT_STATE 里的 userProfile 缓存含 user_text，按作者名匹配取出
+      if (photo.userName) {
+        const sign = this.findAuthorSign(state, photo.userName);
+        if (sign) videoData.authorSign = sign;
+      }
+      return formatResponse(200, "解析成功", videoData);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 从起始左花括号开始，括号平衡提取完整 JSON 字符串（跳过字符串内的括号） */
+  extractBalancedJson(str, startBraceIdx) {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = startBraceIdx; i < str.length; i++) {
+      const ch = str[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+      } else if (ch === '"') {
+        inStr = true;
+      } else if (ch === "{") {
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (depth === 0) return str.slice(startBraceIdx, i + 1);
+      }
+    }
+    return null;
+  }
+
+  /** 深度遍历，找「主视频 photo 对象」并携带其顶层 counts（作者关注/粉丝/作品数） */
+  findPhotoDeep(obj, parent = null, depth = 0) {
+    if (depth > 10 || !obj || typeof obj !== "object") return null;
+    if (
+      (typeof obj.caption === "string" || typeof obj.userName === "string") &&
+      obj.photoId !== undefined &&
+      (obj.coverUrls || obj.mainMvUrls || obj.manifest)
+    ) {
+      return { photo: obj, counts: parent && parent.counts };
+    }
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const result = this.findPhotoDeep(obj[key], obj, depth + 1);
+        if (result) return result;
+      }
+    }
+    return null;
+  }
+
+  /** 按作者名在 INIT_STATE 中查找 userProfile 缓存的简介（user_text），返回首个非空值 */
+  findAuthorSign(state, authorName) {
+    let sign = null;
+    const walk = (obj, depth) => {
+      if (depth > 8 || sign || !obj || typeof obj !== "object") return;
+      if (
+        typeof obj.user_name === "string" &&
+        obj.user_name === authorName &&
+        typeof obj.user_text === "string" &&
+        obj.user_text.trim()
+      ) {
+        sign = obj.user_text.trim();
+        return;
+      }
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          walk(obj[key], depth + 1);
+        }
+      }
+    };
+    walk(state, 0);
+    return sign;
+  }
+
+  /** 从 photo 对象提取统一字段（返回数据里保留 photoId 供展示/调试） */
+  extractVideoFromPhoto(photo) {
+    const videoData = {
+      source: "init-state",
+      photoId: photo.photoId,
+    };
+    // 视频直链：mainMvUrls 优先（[{cdn,url}] 或 [url]），其次 manifest 清晰度列表（按 quality 降序）
+    if (Array.isArray(photo.mainMvUrls)) {
+      for (const item of photo.mainMvUrls) {
+        const u = typeof item === "string" ? item : item && item.url;
+        if (u && u.startsWith("http")) {
+          videoData.photoUrl = u;
+          break;
+        }
+      }
+    }
+    if (!videoData.photoUrl && photo.manifest) {
+      const reps = [];
+      if (Array.isArray(photo.manifest.adaptationSet)) {
+        for (const set of photo.manifest.adaptationSet) {
+          if (Array.isArray(set.representation)) reps.push(...set.representation);
+        }
+      }
+      reps.sort((a, b) => Number(b.quality || 0) - Number(a.quality || 0));
+      for (const rep of reps) {
+        if (rep.url && rep.url.startsWith("http")) {
+          videoData.photoUrl = rep.url;
+          break;
+        }
+        if (
+          Array.isArray(rep.backupUrl) &&
+          rep.backupUrl[0] &&
+          rep.backupUrl[0].startsWith("http")
+        ) {
+          videoData.photoUrl = rep.backupUrl[0];
+          break;
+        }
+      }
+    }
+    // 封面：coverUrls 优先
+    if (Array.isArray(photo.coverUrls)) {
+      for (const item of photo.coverUrls) {
+        const u = typeof item === "string" ? item : item && item.url;
+        if (u && u.startsWith("http")) {
+          videoData.coverUrl = u;
+          break;
+        }
+      }
+    } else if (typeof photo.coverUrl === "string" && photo.coverUrl.startsWith("http")) {
+      videoData.coverUrl = photo.coverUrl;
+    }
+    // 文案 / 作者 / 头像 / 作者ID
+    if (typeof photo.caption === "string") videoData.caption = photo.caption;
+    if (typeof photo.userName === "string") videoData.authorName = photo.userName;
+    if (typeof photo.headUrl === "string" && photo.headUrl.startsWith("http")) {
+      // 快手官方页面（分享页/m.gifshow/桌面 short-video）统一使用 _s.jpg 变体；
+      // 实测 _c/_b/原图变体在 uhead 资源上大量 404（之前曾尝试 _s→_c 高清化导致破图），
+      // 因此保持原始 URL 不变，仅靠 CDN 备选容错。
+      const primary = photo.headUrl;
+      videoData.authorAvatar = primary;
+      // headUrls 提供同一资源的 CDN 备选（实测部分节点如 p2-pro DNS 解析失效，需容错）。
+      // 收集与主 URL 不同的备选，供图片代理按序重试。
+      const fallbacks = [];
+      if (Array.isArray(photo.headUrls)) {
+        for (const item of photo.headUrls) {
+          const u = typeof item === "string" ? item : item && item.url;
+          if (u && u.startsWith("http") && u !== primary && !fallbacks.includes(u)) {
+            fallbacks.push(u);
+          }
+        }
+      }
+      if (fallbacks.length) videoData.authorAvatarFallbacks = fallbacks;
+    }
+    if (photo.userId !== undefined) videoData.authorId = String(photo.userId);
+    // 互动统计
+    for (const k of ["likeCount", "viewCount", "commentCount", "shareCount", "forwardCount"]) {
+      if (photo[k] !== undefined) videoData[k] = photo[k];
+    }
+    // 时长（毫秒）与发布时间（毫秒时间戳）
+    if (photo.duration !== undefined) videoData.duration = photo.duration;
+    if (photo.timestamp !== undefined) videoData.timestamp = photo.timestamp;
+    return videoData;
   }
 
   parseApolloStateRegex(htmlContent) {

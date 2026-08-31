@@ -1,10 +1,10 @@
 /**
- * 图片一键下载工具（纯前端实现，不依赖后端代理）。
+ * 图片一键下载工具。
  *
- * 背景：项目部署在 Cloudflare Workers 免费层，不支持流式代理，
- * 视频/图片一律直链。但图集场景用户需要「一键下载」：
- * 这里通过 fetch 原图 → Blob → a[download] 触发浏览器真实保存；
- * 若图床不支持 CORS（fetch 被拒），自动回退为在新窗口打开直链（用户右键另存）。
+ * 流程：fetch 原图 → Blob → a[download] 触发浏览器真实保存；
+ * 若图床有 CORS / Referer 防盗链（fetch 直链被拒），自动回退到
+ * 后端图片代理 /api/image（服务端带平台 Referer 防 403）；
+ * 代理也失败时，最后回退为在新窗口打开直链（用户右键另存）。
  */
 
 const EXT_BY_TYPE: Record<string, string> = {
@@ -29,31 +29,44 @@ function ensureExt(filename: string, blob: Blob, src: string): string {
   return `${filename}.${EXT_BY_TYPE[blob.type] || getImageExt(src) || "jpg"}`;
 }
 
-/** 单张图片下载：优先真实下载（Blob + a[download]），CORS 失败回退新窗口打开 */
-export async function downloadImage(src: string, filename: string): Promise<boolean> {
-  try {
-    const res = await fetch(src, { mode: "cors" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    // 响应可能是 HTML 错误页而非图片，做基础校验
-    if (!blob.type.startsWith("image/") && blob.size < 1024) {
-      throw new Error("not an image");
-    }
-    const name = ensureExt(filename, blob, src);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return true;
-  } catch {
-    // 图床不支持 CORS / 防盗链：回退为新窗口打开直链
-    window.open(src, "_blank", "noopener,noreferrer");
-    return false;
+/** 拉取图片 Blob；响应非图片（HTML 错误页等）抛错 */
+async function fetchImageBlob(url: string): Promise<Blob> {
+  const res = await fetch(url, { mode: "cors" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  // 响应可能是 HTML 错误页而非图片，做基础校验
+  if (!blob.type.startsWith("image/") && blob.size < 1024) {
+    throw new Error("not an image");
   }
+  return blob;
+}
+
+/** 单张图片下载：优先直链（Blob + a[download]），防盗链失败走后端代理，再失败回退新窗口打开 */
+export async function downloadImage(src: string, filename: string): Promise<boolean> {
+  let blob: Blob;
+  try {
+    blob = await fetchImageBlob(src);
+  } catch {
+    // 直链被 CORS / Referer 防盗链拦截：走后端图片代理（服务端带平台 Referer 防 403）
+    try {
+      blob = await fetchImageBlob(`/api/image?url=${encodeURIComponent(src)}`);
+    } catch {
+      // 代理也失败：回退为新窗口打开直链（用户右键另存）
+      window.open(src, "_blank", "noopener,noreferrer");
+      return false;
+    }
+  }
+
+  const name = ensureExt(filename, blob, src);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   extractIdFromUrl,
   extractTtwid,
   isUserProfileUrl,
+  extractUserFromRouter,
 } from "@/lib/douyin-extract";
 
 // 页面快照：tests/snapshots/*.html
@@ -129,6 +130,34 @@ describe("douyin-extract：页面快照回归", () => {
     expect(
       isUserProfileUrl("https://www.iesdouyin.com/share/note/7389625411234567890")
     ).toBe(false);
+  });
+
+  it("从用户主页数据深度提取博主信息（粉丝/关注/获赞）", () => {
+    const routerData = {
+      loaderData: {
+        "user/profile/page": {
+          userInfoRes: {
+            user: {
+              nickname: "博主",
+              follower_count: 12345,
+              following_count: 67,
+              total_favorited: "89012",
+            },
+          },
+        },
+      },
+    };
+    const user = extractUserFromRouter(routerData);
+    expect(user).not.toBeNull();
+    expect(user).toMatchObject({
+      nickname: "博主",
+      follower_count: 12345,
+      following_count: 67,
+      total_favorited: "89012",
+    });
+    // 无用户信息的数据返回 null
+    expect(extractUserFromRouter({ loaderData: {} })).toBeNull();
+    expect(extractUserFromRouter(null)).toBeNull();
   });
 
   it("从响应头提取 ttwid", () => {

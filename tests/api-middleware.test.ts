@@ -149,4 +149,164 @@ describe("api-middleware", () => {
     expect(res.status).toBe(200);
     expect(parseSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("fmt=text 成功返回纯文本 '标题\\n直链'", async () => {
+    const parseSpy = vi.fn().mockResolvedValue({
+      code: 200,
+      msg: "解析成功",
+      platform: "douyin",
+      data: { title: "视频标题", url: "https://v.mp4", cover: "c.jpg" },
+    });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const req = new Request(
+      "http://127.0.0.1/api/douyin?fmt=text&url=" +
+        encodeURIComponent("https://v.douyin.com/xxxxx/")
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/plain");
+    expect(await res.text()).toBe("视频标题\nhttps://v.mp4");
+  });
+
+  it("fmt=text B站直链从 videos[0].url 兜底", async () => {
+    const parseSpy = vi.fn().mockResolvedValue({
+      code: 1,
+      msg: "解析成功！",
+      title: "B站视频",
+      user: { name: "UP主" },
+      data: [{ title: "P1", video_url: "https://p1.mp4", duration: 180 }],
+    });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const req = new Request(
+      "http://127.0.0.1/api/bilibili?fmt=text&url=" +
+        encodeURIComponent("https://www.bilibili.com/video/BV1xx411c7mD")
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("B站视频\nhttps://p1.mp4");
+  });
+
+  it("fmt=text 解析失败返回错误信息", async () => {
+    const parseSpy = vi.fn().mockResolvedValue({ code: 400, msg: "解析失败" });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const req = new Request(
+      "http://127.0.0.1/api/douyin?fmt=text&url=" +
+        encodeURIComponent("https://v.douyin.com/xxxxx/")
+    );
+    const res = await handler(req);
+
+    // 既有行为：解析器返回失败结果时 HTTP 层为 200，错误码在 body（code=400）
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("解析失败");
+  });
+
+  it("无 fmt 参数时仍返回 JSON（回归）", async () => {
+    const parseSpy = vi.fn().mockResolvedValue({
+      code: 200,
+      msg: "解析成功",
+      data: { title: "t", url: "u.mp4" },
+    });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const req = new Request(
+      "http://127.0.0.1/api/douyin?url=" + encodeURIComponent("https://v.douyin.com/xxxxx/")
+    );
+    const res = await handler(req);
+
+    expect(res.headers.get("Content-Type")).toContain("application/json");
+    expect((await res.json()).data.url).toBe("u.mp4");
+  });
+
+  it("支持分享文案：自动提取其中链接并解析（抖音）", async () => {
+    // beforeEach 将 isValidUrl mock 为恒 true，此处恢复真实校验以测试文案提取路径
+    vi.spyOn(apiUtils, "isValidUrl").mockImplementation(
+      (s) => { try { new URL(s); return true; } catch { return false; } }
+    );
+    const parseSpy = vi.fn().mockResolvedValue({ code: 1, msg: "ok" });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const shareText =
+      "【这个视频太有意思了】 复制打开抖音，看看 https://v.douyin.com/xxxxx/ 的作品，太搞笑了";
+    const req = new Request(
+      "http://127.0.0.1/api/douyin?url=" + encodeURIComponent(shareText)
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(parseSpy).toHaveBeenCalledWith("https://v.douyin.com/xxxxx/");
+  });
+
+  it("支持 B站分享文案：链接后跟全角标点也能提取", async () => {
+    vi.spyOn(apiUtils, "isValidUrl").mockImplementation(
+      (s) => { try { new URL(s); return true; } catch { return false; } }
+    );
+    const parseSpy = vi.fn().mockResolvedValue({ code: 1, msg: "ok" });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const shareText =
+      "【哔哩哔哩】https://b23.tv/AbCdEfZ，复制本条信息打开【哔哩哔哩】App查看精彩内容！";
+    const req = new Request(
+      "http://127.0.0.1/api/bilibili?url=" + encodeURIComponent(shareText)
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(parseSpy).toHaveBeenCalledWith("https://b23.tv/AbCdEfZ");
+  });
+
+  it("支持快手分享文案：链接后跟空格+中文描述也能提取（new URL 宽容编码的回归）", async () => {
+    vi.spyOn(apiUtils, "isValidUrl").mockImplementation(
+      (s) => { try { new URL(s); return true; } catch { return false; } }
+    );
+    const parseSpy = vi.fn().mockResolvedValue({ code: 1, msg: "ok" });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const shareText =
+      "https://v.kuaishou.com/Ku1rFvu1 你的新版奶爸来了唷\"转场 \"cos \"扁鹊\"\"王者荣耀cos 该作品在快手被播放过49.6万次，点击链接，打开【快手】直接观看！";
+    const req = new Request(
+      "http://127.0.0.1/api/kuaishou?url=" + encodeURIComponent(shareText)
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(parseSpy).toHaveBeenCalledWith("https://v.kuaishou.com/Ku1rFvu1");
+  });
+
+  it("链接后直接跟中文句号（无空格）也能提取", async () => {
+    vi.spyOn(apiUtils, "isValidUrl").mockImplementation(
+      (s) => { try { new URL(s); return true; } catch { return false; } }
+    );
+    const parseSpy = vi.fn().mockResolvedValue({ code: 1, msg: "ok" });
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const shareText = "https://v.kuaishou.com/Ku1rFvu1。你的新版奶爸来了唷";
+    const req = new Request(
+      "http://127.0.0.1/api/kuaishou?url=" + encodeURIComponent(shareText)
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(200);
+    expect(parseSpy).toHaveBeenCalledWith("https://v.kuaishou.com/Ku1rFvu1");
+  });
+
+  it("纯文案无链接时仍返回 400", async () => {
+    vi.spyOn(apiUtils, "isValidUrl").mockImplementation(
+      (s) => { try { new URL(s); return true; } catch { return false; } }
+    );
+    const parseSpy = vi.fn();
+    const handler = createApiHandler(parseSpy, { shouldCache: false });
+
+    const req = new Request(
+      "http://127.0.0.1/api/douyin?url=" + encodeURIComponent("这个视频太有意思了，没有链接")
+    );
+    const res = await handler(req);
+
+    expect(res.status).toBe(400);
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
 });

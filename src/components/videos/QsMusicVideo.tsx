@@ -47,7 +47,7 @@ export default function QsMusicVideo({ data }: QsMusicVideoProps) {
           {musicData.url && (
             <Button
               asChild
-              className="gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:opacity-90">
+              className="gap-2 bg-gradient-to-r from-purple-500 to-violet-500 hover:opacity-90">
               <a href={musicData.url} target="_blank" rel="noopener noreferrer">
                 <Download className="h-4 w-4" />
                 下载音乐

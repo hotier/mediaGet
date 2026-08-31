@@ -7,6 +7,7 @@ import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import { downloadAllImages } from "@/utils/downloadImages";
 import { Download, Loader2 } from "lucide-react";
+import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -27,6 +28,19 @@ export default function XhsVideo({ data }: XhsVideoProps) {
   const isImageType = xhsData.type === "image";
   const images = xhsData.images?.filter(Boolean) || [];
 
+  // 数字缩写：>1万 → x.x万 / xx万，其余千分位
+  const formatCount = (n: number) =>
+    n >= 10000
+      ? `${(n / 10000).toFixed(n >= 1000000 ? 0 : 1)}万`
+      : n.toLocaleString("zh-CN");
+
+  // 博主主页公开信息徽标：关注 / 粉丝 / 获赞（缺失自动隐藏）
+  const authorBadges: { label: string; value?: number }[] = [
+    { label: "关注", value: xhsData.followingCount },
+    { label: "粉丝", value: xhsData.followerCount },
+    { label: "获赞", value: xhsData.totalFavorited },
+  ];
+
   const handleDownloadAll = async () => {
     if (downloading || images.length === 0) return;
     setDownloading(true);
@@ -39,50 +53,78 @@ export default function XhsVideo({ data }: XhsVideoProps) {
 
   return (
     <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
-      {/* Author Header */}
-      <Card className="p-5">
-        <div className="flex items-center gap-4">
-          {xhsData.avatar && (
-            <div className="relative">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[#ff2442] to-[#ff5c7c] blur-sm opacity-50" />
-              <Image
-                src={xhsData.avatar}
-                alt={xhsData.author || ""}
-                width={56}
-                height={56}
-                className="relative rounded-full border-2 border-glass-3"
-                unoptimized
-              />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            {xhsData.title && (
-              <h2 className="text-lg font-semibold text-primary line-clamp-2 mb-1">
-                {xhsData.title}
-              </h2>
-            )}
-            {xhsData.author && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-secondary">作者</span>
-                <span className="text-sm font-medium text-accent">{xhsData.author}</span>
+      {/* 博主信息卡：头像 + 昵称(可点击主页) + 小红书号 + 简介 + 关注/粉丝/获赞（主页公开信息，缺失自动隐藏） */}
+      {(xhsData.avatar || xhsData.author) && (
+        <Card className="p-5">
+          <div className="flex items-center gap-4">
+            {xhsData.avatar && (
+              <div className="relative flex-shrink-0">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[#ff2442] to-[#ff5c7c] blur-sm opacity-50" />
+                <Image
+                  src={xhsData.avatar}
+                  alt={xhsData.author || ""}
+                  width={56}
+                  height={56}
+                  className="relative rounded-full border-2 border-glass-3"
+                  unoptimized
+                />
               </div>
             )}
-          </div>
-
-          {/* XHS Logo */}
-          <div className="flex-shrink-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ff2442] to-[#ff5c7c] flex items-center justify-center">
-              <span className="text-white text-xs font-bold">小红书</span>
+            <div className="flex-1 min-w-0">
+              {xhsData.author && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-secondary">作者</span>
+                  {xhsData.authorUrl ? (
+                    <a
+                      href={xhsData.authorUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`打开 ${xhsData.author} 的小红书主页`}
+                      className="text-sm font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
+                      {xhsData.author}
+                    </a>
+                  ) : (
+                    <span className="text-sm font-medium text-accent truncate">
+                      {xhsData.author}
+                    </span>
+                  )}
+                </div>
+              )}
+              {xhsData.authorId && (
+                <p className="mt-0.5 text-xs text-muted truncate">
+                  小红书号：{xhsData.authorId}
+                </p>
+              )}
+              {xhsData.sign && (
+                <p className="mt-0.5 flex items-start gap-1 text-xs text-muted">
+                  <span className="flex-shrink-0">简介：</span>
+                  <span className="min-w-0 line-clamp-2">{xhsData.sign}</span>
+                </p>
+              )}
+              {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
+              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                {authorBadges.map(
+                  (badge) =>
+                    badge.value != null &&
+                    Number(badge.value) > 0 && (
+                      <span
+                        key={badge.label}
+                        className="inline-flex items-center gap-1">
+                        <span className="text-muted">{badge.label}</span>
+                        <span className="font-semibold text-primary">
+                          {formatCount(Number(badge.value))}
+                        </span>
+                      </span>
+                    )
+                )}
+              </div>
+            </div>
+            <div className="flex-shrink-0">
+              <PlatformIcon platform="xhs" size={40} rounded="rounded-xl" />
             </div>
           </div>
-        </div>
-      </Card>
-
-      {/* 作品信息：作者 / 小红书号 / 内容类型 */}
-      <ParseInfoPanel platform="xhs" data={xhsData} title="笔记信息" />
-
-      {/* 文案：视频信息与下载按钮之间，可一键复制 */}
-      {xhsData.desc && <CaptionBox text={xhsData.desc} title="笔记文案" />}
+        </Card>
+      )}
 
       {/* Video：封面 + 播放/下载（小红书已走代理，内嵌当前页面播放/下载，体验更好） */}
       {!isImageType && xhsData.url && (
@@ -113,7 +155,7 @@ export default function XhsVideo({ data }: XhsVideoProps) {
                 alt={xhsData.title || "图片"}
                 fill
                 sizes="(max-width: 800px) 100vw, 800px"
-                className="object-cover transition-transform duration-500 hover:scale-105"
+                className="object-cover"
                 priority
                 unoptimized
                 onLoad={() => setImageLoading(false)}
@@ -175,6 +217,11 @@ export default function XhsVideo({ data }: XhsVideoProps) {
         </Card>
       )}
 
+      {/* 文案：笔记信息与媒体之间，可一键复制 */}
+      {xhsData.desc && <CaptionBox text={xhsData.desc} title="笔记文案" />}
+
+      {/* 笔记信息：标题 / 内容类型（博主卡已展示作者信息） */}
+      <ParseInfoPanel platform="xhs" data={xhsData} title="笔记信息" />
     </div>
   );
 }

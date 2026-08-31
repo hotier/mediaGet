@@ -2,11 +2,14 @@
  * 通用视频代理：解决第三方视频 CDN（小红书 xhscdn 等）的 Referer 防盗链。
  * 这些 CDN 在 https 来源页面上直链加载/新窗口打开会 403，导致无法播放和下载。
  *
- * 用法：GET /api/video-proxy?url=<encodeURIComponent(原视频 URL)>
+ * 用法：
+ * - 播放：GET /api/video-proxy?url=<encodeURIComponent(原视频 URL)>
+ * - 下载：GET /api/video-proxy?url=...&download=1&filename=<encodeURIComponent(文件名.mp4)>
  *
  * - 小红书 xhscdn 视频 CDN：fetch 时带 Referer: https://www.xiaohongshu.com/
  * - 其他视频源：直接 fetch（不强制 Referer，避免误伤）
  * - 支持 Range 请求（浏览器播放/拖动进度条必须），透传 206 Partial Content
+ * - download=1 时设置 Content-Disposition: attachment，强制浏览器下载文件而非播放
  * - 流式转发，不整段缓存到内存，避免大视频占用内存
  * - 透传 Content-Type / Content-Length / Accept-Ranges
  * - 超时策略：首字节 30s 快速失败；传输中不设总时长上限（大视频弱网可能传很久），
@@ -18,6 +21,30 @@ import { isBlockedIP, getClientIP, logger } from "@/lib/api-utils";
 
 function isXhsHost(hostname) {
   return hostname === "xhscdn.com" || hostname.endsWith(".xhscdn.com");
+}
+
+/** 抖音系主机（aweme/v1/play 接口及 CDN）：带 douyin Referer 防 403 */
+function isDouyinHost(hostname) {
+  return (
+    hostname === "douyin.com" ||
+    hostname.endsWith(".douyin.com") ||
+    hostname === "iesdouyin.com" ||
+    hostname.endsWith(".iesdouyin.com") ||
+    hostname === "douyinvod.com" ||
+    hostname.endsWith(".douyinvod.com") ||
+    hostname === "snssdk.com" ||
+    hostname.endsWith(".snssdk.com")
+  );
+}
+
+/** 微博视频 CDN（weibocdn 等）：防盗链必须带 weibo Referer，否则 403 */
+function isWeiboHost(hostname) {
+  return (
+    hostname === "weibocdn.com" ||
+    hostname.endsWith(".weibocdn.com") ||
+    hostname === "sinaimg.cn" ||
+    hostname.endsWith(".sinaimg.cn")
+  );
 }
 
 export async function GET(request) {
@@ -32,6 +59,18 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const encoded = searchParams.get("url");
   if (!encoded) return new Response("Missing url", { status: 400 });
+
+  // 下载模式：download=1 时响应带 Content-Disposition: attachment 强制保存文件
+  const download = searchParams.get("download") === "1";
+  // 下载文件名（可选，需自行 encodeURIComponent），过滤不安全字符
+  const filenameParam = searchParams.get("filename") || "";
+  const safeFilename =
+    filenameParam
+      .replace(/[\\/:*?"<>|\r\n]/g, "_")
+      .replace(/\.{2,}/g, "_")
+      .replace(/[^\w.\-\u4e00-\u9fa5 ]/g, "_")
+      .trim()
+      .slice(0, 120) || "video.mp4";
 
   let target;
   try {
@@ -51,6 +90,14 @@ export async function GET(request) {
   // 小红书视频 CDN 防盗链：必须 Referer: xiaohongshu.com，否则 403
   if (isXhsHost(target.hostname)) {
     headers.Referer = "https://www.xiaohongshu.com/";
+  }
+  // 抖音 play 接口 / CDN：带 douyin Referer 防 403
+  if (isDouyinHost(target.hostname)) {
+    headers.Referer = "https://www.douyin.com/";
+  }
+  // 微博视频 CDN：带 weibo Referer 防 403
+  if (isWeiboHost(target.hostname)) {
+    headers.Referer = "https://weibo.com/";
   }
 
   // 透传客户端的 Range 头（浏览器播放/拖动进度条必需）
@@ -138,6 +185,10 @@ export async function GET(request) {
   };
   if (contentLength) {
     responseHeaders["Content-Length"] = contentLength;
+  }
+  // 下载模式：Content-Disposition 用 ASCII fallback + RFC 5987 编码，支持中文文件名
+  if (download) {
+    responseHeaders["Content-Disposition"] = `attachment; filename="video.mp4"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`;
   }
   // 透传 206 的 Content-Range（Range 请求时上游会返回）
   const contentRange = upstream.headers.get("content-range");

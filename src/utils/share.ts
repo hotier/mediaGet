@@ -1,18 +1,17 @@
 import type { VideoPlatformKey } from "@/config/video-platforms";
+import { extractUrlFromShareText } from "@/lib/share-text";
 
 export type Platform = VideoPlatformKey;
 
-// 提取文本中的第一个 URL（包含常见分享文案里的 URL）
+// 提取文本中的第一个 URL（包含常见分享文案里的 URL）。
+// http(s) 链接提取逻辑与后端 /api/parse-text 共用 src/lib/share-text.ts，
+// 避免前后端两套正则漂移不一致；此处额外兜底「无协议头的裸域名短链」。
 export function extractUrl(text: string): string | null {
-  const httpUrl = text.match(
-    /(https?:\/\/[^\s\u3000\u00A0，。！？、；：【】（）《》“”‘’]+)/
-  );
-  if (httpUrl && httpUrl[1]) {
-    return httpUrl[1].replace(/[，。！？、；：.,!?;]+$/, "");
-  }
+  const httpUrl = extractUrlFromShareText(text);
+  if (httpUrl) return httpUrl;
 
   const bareUrlMatch = text.match(
-    /(?:^|\s)((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\/[^\s\u3000\u00A0，。！？、；：【】（）《》“”‘’]+)/
+    /(?:^|\s)((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\/[^\s\u3000\u00A0，。！？、；：【】（）《》"'“”‘’<>]+)/
   );
   if (bareUrlMatch && bareUrlMatch[1]) {
     return bareUrlMatch[1].replace(/[，。！？、；：.,!?;]+$/, "");
@@ -143,20 +142,5 @@ export function detectPlatform(text: string): VideoPlatformKey | null {
   return null;
 }
 
-export function extractUrlFromText(text: string): string | null {
-  const httpUrl = text.match(
-    /(https?:\/\/[^\s\u3000\u00A0，。！？、；：【】（）《》"'"'"'"]+)/
-  );
-  if (httpUrl && httpUrl[1]) {
-    return httpUrl[1].replace(/[，。！？、；：.,!?;]+$/, "");
-  }
-
-  const bareUrlMatch = text.match(
-    /(?:^|\s)((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\/[^\s\u3000\u00A0，。！？、；：【】（）《》"'"'"'"]+)/
-  );
-  if (bareUrlMatch && bareUrlMatch[1]) {
-    return bareUrlMatch[1].replace(/[，。！？、；：.,!?;]+$/, "");
-  }
-
-  return null;
-}
+/** 与 extractUrl 完全一致（历史兼容导出，前端表单直接使用） */
+export const extractUrlFromText = extractUrl;

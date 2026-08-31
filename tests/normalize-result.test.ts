@@ -107,6 +107,8 @@ describe("normalizeResult：统一响应模型", () => {
     expect(out.data.cover).toBe("https://cover.jpg");
     expect(out.data.author).toBe("UP主");
     expect(out.data.avatar).toBe("https://avatar.jpg");
+    // 顶层 url：统一契约可直接消费，取第一分P直链
+    expect(out.data.url).toBe("https://p1.mp4");
     expect(out.data.videos).toHaveLength(2);
     expect(out.data.videos[0]).toMatchObject({
       title: "P1",
@@ -117,11 +119,12 @@ describe("normalizeResult：统一响应模型", () => {
     });
   });
 
-  it("bilibili 无分P数据时不产生空 videos", () => {
+  it("bilibili 无分P数据时不产生空 videos，顶层 url 为空", () => {
     const input = { code: 1, msg: "ok", title: "t", data: [] };
     const out = normalizeResult(input);
     expect(out.code).toBe(200);
     expect(out.data.videos).toEqual([]);
+    expect(out.data.url).toBeUndefined();
   });
 
   it("错误响应不被归一化（原对象返回）", () => {

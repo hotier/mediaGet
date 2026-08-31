@@ -62,9 +62,12 @@
   .dark {
     color-scheme: dark;
 
-    /* Core Palette - 深青墨（青黑，区别于纯黑，强化品牌辨识度） */
-    --background: #051210;
-    --foreground: #edf7f4;
+    /* Core Palette - 深蓝黑（中性冷调，避免青绿带来的「暗色偏绿」观感） */
+    --background: #0a0f16;
+    --foreground: #e6edf3;
+
+    /* Dynamic Accent - 暗色下覆盖为靛蓝，与浅色的薄荷青绿区分 */
+    --accent: #3b82f6;
 
     /* Glass Layers */
     --glass-1: rgba(255, 255, 255, 0.03);
@@ -72,9 +75,9 @@
     --glass-3: rgba(255, 255, 255, 0.1);
 
     /* Text */
-    --text-primary: #edf7f4;
-    --text-secondary: #a3bdb6;
-    --text-muted: #67837b;
+    --text-primary: #e6edf3;
+    --text-secondary: #9db1c0;
+    --text-muted: #64748b;
 
     /* Borders */
     --border-subtle: rgba(255, 255, 255, 0.08);
@@ -82,14 +85,14 @@
     --border-strong: rgba(255, 255, 255, 0.2);
 
     /* Shadows */
-    --shadow-glow: 0 0 60px rgba(20, 184, 166, 0.25);
+    --shadow-glow: 0 0 60px rgba(59, 130, 246, 0.22);
     --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.45);
 
-    /* Aurora 背景元素 */
-    --grid-line: rgba(255, 255, 255, 0.045);
-    --orb-1: rgba(20, 184, 166, 0.3);
-    --orb-2: rgba(6, 182, 212, 0.22);
-    --orb-3: rgba(52, 211, 153, 0.18);
+    /* Aurora 背景元素（蓝紫光晕，替代青绿） */
+    --grid-line: rgba(148, 163, 184, 0.05);
+    --orb-1: rgba(59, 130, 246, 0.22);
+    --orb-2: rgba(139, 92, 246, 0.16);
+    --orb-3: rgba(56, 189, 248, 0.14);
     --noise-opacity: 0.015;
   }
 
@@ -132,7 +135,7 @@
 
   /* Selection */
   ::selection {
-    background-color: rgb(20 184 166 / 0.2);
+    background-color: color-mix(in srgb, var(--accent) 20%, transparent);
     color: var(--accent);
   }
 
@@ -176,6 +179,11 @@
     background-image: linear-gradient(135deg, #06b6d4 0%, #14b8a6 50%, #34d399 100%);
   }
 
+  /* 暗色下渐变标题改为蓝紫，避免偏绿 */
+  .dark .gradient-text {
+    background-image: linear-gradient(135deg, #38bdf8 0%, #6366f1 50%, #a78bfa 100%);
+  }
+
   /* Input Focus（克制：仅保留细描边） */
   .input-glow {
     transition: all 0.3s ease;
@@ -184,7 +192,7 @@
   }
 
   .input-glow:focus {
-    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   /* Mobile touch handling for buttons */

@@ -59,6 +59,34 @@ export function tryParseEmbedded(html) {
 }
 
 /**
+ * 从用户主页 _ROUTER_DATA 中深度查找博主信息对象。
+ * 用户主页的 user 对象在 loaderData["user/profile/page"].userInfoRes.user，
+ * 为规避路径随版本变化，直接深度搜索含 follower_count 的节点。
+ * 返回 null 表示未找到（无需区分具体原因）。
+ */
+export function extractUserFromRouter(info) {
+  const seen = new Set();
+  const stack = [info];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    if (
+      typeof node.follower_count === "number" &&
+      "following_count" in node &&
+      "total_favorited" in node
+    ) {
+      return node;
+    }
+    for (const value of Object.values(node)) {
+      if (value && typeof value === "object") stack.push(value);
+    }
+  }
+  return null;
+}
+
+/**
  * 从 loaderData 中提取视频 / 图文数据，返回标准化结果或 null
  */
 export function parseVideoData(videoInfo) {
@@ -135,6 +163,8 @@ export function parseVideoData(videoInfo) {
       data: {
         author: videoData.author.nickname || "未知作者",
         uid: videoData.author.unique_id || "",
+        // 博主签名 / 个人简介（分享页通常已含，作为主页接口失败时的兜底）
+        sign: videoData.author?.signature || "",
         avatar: videoData.author.avatar_medium?.url_list?.[0] || "",
         like: videoData.statistics?.digg_count || 0,
         time: videoData.create_time || 0,
@@ -149,10 +179,22 @@ export function parseVideoData(videoInfo) {
         duration: videoData.video?.duration || 0,
         // 音频直链（无则 undefined，前端不显示「下载音频」按钮）
         audioUrl: audioUrl || undefined,
+        // 互动统计（播放/点赞/评论/收藏/分享），供信息面板展示
+        stat: {
+          view: videoData.statistics?.play_count || 0,
+          like: videoData.statistics?.digg_count || 0,
+          reply: videoData.statistics?.comment_count || 0,
+          favorite: videoData.statistics?.collect_count || 0,
+          share: videoData.statistics?.share_count || 0,
+        },
         music: {
           author: videoData.music?.author || "未知音乐作者",
+          title: videoData.music?.title || "",
           avatar: videoData.music?.cover_large?.url_list?.[0] || "",
         },
+        awemeId: videoData.aweme_id || "",
+        // 博主 sec_uid（用于请求用户主页获取粉丝/关注/获赞等公开信息）
+        secUid: videoData.author?.sec_uid || videoData.author?.uid || "",
       },
     };
   } catch (error) {

@@ -29,6 +29,33 @@ let visitorCookieCache = "";
 let visitorCookieExpireAt = 0;
 const VISITOR_COOKIE_TTL_MS = 25 * 60 * 1000;
 
+/** 微博字符型 mid 的 base62 字符表（数字+小写+大写） */
+const MID_BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/**
+ * 字符型 mid（如 "RfXp5BMsF"）→ 数字 mid（16 位十进制，如 "5336206955708503"）。
+ * 微博编码规则：数字 mid 从右往左每 7 位一组 → base62 4 字符；
+ * 解码则反向：字符 mid 从右往左每 4 字符一组 → 十进制，除最左组外每组补零到 7 位。
+ */
+function url2mid(urlMid) {
+  if (!urlMid) return "";
+  const groups = [];
+  for (let i = urlMid.length - 4; i > -4; i -= 4) {
+    const start = i > 0 ? i : 0;
+    const len = i > 0 ? 4 : i + 4;
+    const seg = urlMid.substring(start, start + len);
+    let n = 0;
+    for (let k = 0; k < seg.length; k++) {
+      const idx = MID_BASE62.indexOf(seg[k]);
+      if (idx < 0) return ""; // 含非法字符
+      n = n * 62 + idx;
+    }
+    groups.unshift(String(n).padStart(7, "0"));
+  }
+  // 去掉最左组的前导 0，得到数字 mid
+  return groups.join("").replace(/^0+/, "");
+}
+
 /**
  * 从各种微博分享链接形态中提取视频 oid（形如 "1034:5336206955708503"）。
  * 支持：tv/show/{id}、show?fid={id}、video.weibo.com/show、纯数字等。
@@ -49,6 +76,13 @@ function extractId(rawUrl) {
   if (!id) {
     const m = rawUrl.match(/(\d{16})/);
     id = m ? m[1] : null;
+  }
+  // 字符型 mid：weibo.com/{uid}/{mid}（如 RfXp5BMsF），先转成数字 mid
+  if (!id) {
+    const m = rawUrl.match(/weibo\.com\/\d+\/([A-Za-z0-9]{5,16})/);
+    if (m) {
+      id = url2mid(m[1]) || m[1];
+    }
   }
   return id ? decodeURIComponent(id) : null;
 }
@@ -131,6 +165,23 @@ function normalizeUrl(u) {
   return u.startsWith("//") ? `https:${u}` : u;
 }
 
+/**
+ * 微博计数归一化：兼容数字 / 数字字符串 / 中文单位字符串（"32.1万"、"1.2亿"）。
+ * m.weibo.cn 接口对较大的关注/粉丝/互动数会返回带单位的字符串，
+ * 直接 Number() 得到 NaN，导致前端按 0 处理隐藏该行。
+ */
+function parseCount(v) {
+  if (v == null || v === "") return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const s = String(v).trim();
+  const w = /^([\d.]+)\s*万$/.exec(s);
+  if (w) return parseFloat(w[1]) * 10000;
+  const y = /^([\d.]+)\s*亿$/.exec(s);
+  if (y) return parseFloat(y[1]) * 100000000;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** 微博图 URL 统一放大尺寸（缩略图 → 原图） */
 function normalizeImageUrl(u) {
   const url = normalizeUrl(u);
@@ -168,16 +219,42 @@ function extractImagesFromMblog(mblog) {
 function extractFromMWeibo(json) {
   const mblog = json?.data?.mblog || json?.data || null;
   if (!mblog) return null;
-  const title = (mblog.text || "").replace(/<[^>]+>/g, "").trim().slice(0, 120);
-  const author = mblog.user?.screen_name || "";
+  const text = (mblog.text || "").replace(/<[^>]+>/g, "").trim();
+  const title = text.slice(0, 120);
+  const user = mblog.user || {};
+  const author = user.screen_name || "";
   const avatar = normalizeUrl(
-    mblog.user?.avatar_large ||
-      mblog.user?.avatar_hd ||
-      mblog.user?.profile_image_url ||
+    user.avatar_large ||
+      user.avatar_hd ||
+      user.profile_image_url ||
       ""
   );
   const time = mblog.created_at || "";
-  const base = { title, author, avatar, time };
+  // 博主主页公开信息（对齐小红书博主卡：可点主页 + 简介 + 关注/粉丝）
+  const uid = String(user.idstr || user.id || "");
+  const authorUrl = uid ? `https://weibo.com/u/${uid}` : "";
+  const sign = user.description || "";
+  const followingCount = parseCount(user.follow_count);
+  const followerCount = parseCount(user.followers_count);
+  // 微博互动统计（对齐小红书信息面板：点赞/评论/转发）
+  const like = parseCount(mblog.attitudes_count);
+  const reply = parseCount(mblog.comments_count);
+  const share = parseCount(mblog.reposts_count);
+  const base = {
+    title,
+    desc: text,
+    author,
+    authorId: uid,
+    authorUrl,
+    sign,
+    followingCount,
+    followerCount,
+    avatar,
+    time,
+    like,
+    reply,
+    share,
+  };
 
   // 1) 视频：page_info.media_info 多级降级取直链
   const pageInfo = mblog.page_info || {};

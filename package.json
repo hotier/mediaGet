@@ -43,6 +43,19 @@
     "postcss": "^8",
     "tailwindcss": "^3.4.16",
     "typescript": "^5",
-    "vitest": "^2.0.5"
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "workbox-build": {
+      ".": "7.4.1",
+      "glob": "12.0.0"
+    },
+    "workbox-webpack-plugin": "7.4.1",
+    "workbox-core": "7.4.1",
+    "workbox-window": "7.4.1",
+    "next": {
+      "postcss": "^8.5.23"
+    },
+    "sharp": "^0.35.0"
   }
 }

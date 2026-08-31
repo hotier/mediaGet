@@ -90,6 +90,24 @@ function safeGet(obj, path) {
 }
 
 /**
+ * 兜底查找互动统计：从 note.noteDetailMap 全量遍历，取第一个带 interactInfo 的笔记
+ * （不同分享入口结构略有差异，interactInfo 可能在 entry 或 entry.note 上）
+ */
+function findFirstInteractInfo(root) {
+  const detailMap = safeGet(root, "note.noteDetailMap");
+  if (!detailMap || typeof detailMap !== "object") return null;
+  for (const key of Object.keys(detailMap)) {
+    const entry = detailMap[key];
+    const info =
+      safeGet(entry, "note.interactInfo") ||
+      safeGet(entry, "interactInfo") ||
+      null;
+    if (info && typeof info === "object") return info;
+  }
+  return null;
+}
+
+/**
  * 新版笔记页：note.currentNoteId + note.noteDetailMap[id].note
  * 旧版：noteData.data.noteData 等
  */
@@ -250,20 +268,47 @@ async function xhs(url) {
     }
 
     // 安全地构建基础数据
+    // 小红书号优先取 user.redId（自定义号），缺失时回退 userId
+    const userId =
+      safeGet(noteData, "user.userId") || safeGet(noteData, "user.id") || "";
+    // 互动统计：主路径取 noteData.interactInfo，缺失时从 noteDetailMap 全量兜底
+    const interactInfo = noteData.interactInfo || findFirstInteractInfo(decoded);
     const data = {
       author:
         safeGet(noteData, "user.nickName") ||
         safeGet(noteData, "user.nickname") ||
         safeGet(noteData, "user.name") ||
         "",
-      authorID:
-        safeGet(noteData, "user.userId") || safeGet(noteData, "user.id") || "",
+      authorID: safeGet(noteData, "user.redId") || userId,
+      // 博主主页链接：由 userId 拼 profile 首页（前端可点击跳转）
+      authorUrl: userId
+        ? `https://www.xiaohongshu.com/user/profile/${userId}`
+        : "",
+      // 博主简介（笔记页 user 可能带，缺失时前端自动隐藏）
+      sign:
+        safeGet(noteData, "user.description") ||
+        safeGet(noteData, "user.desc") ||
+        "",
       title: noteData.title || "",
       desc: noteData.desc || noteData.description || "",
       avatar:
         safeGet(noteData, "user.avatar") ||
         safeGet(noteData, "user.avatarUrl") ||
         "",
+      // —— 帖子（笔记）信息 ——
+      // 发布时间：小红书 time/lastUpdateTime 为毫秒时间戳，统一转成 unix 秒给前端 formatTime
+      time: (() => {
+        const rawTime = noteData.time ?? noteData.lastUpdateTime;
+        return typeof rawTime === "number" && rawTime >= 1e12
+          ? Math.floor(rawTime / 1000)
+          : (rawTime ?? "");
+      })(),
+      // 笔记互动统计（interactInfo 各计数可能是字符串，保留原始值交给前端格式化）
+      like: safeGet(interactInfo, "likedCount") ?? "",
+      favorite: safeGet(interactInfo, "collectedCount") ?? "",
+      reply: safeGet(interactInfo, "commentCount") ?? "",
+      share: safeGet(interactInfo, "sharedCount") ?? "",
+      noteId: noteData.noteId ?? "",
     };
 
     // 检查视频URL

@@ -53,7 +53,7 @@ export const VIDEO_PLATFORMS = {
     emoji: "🤣",
     color: "#ff9f43",
     gradient: "from-[#ff9f43] to-[#ffc048]",
-    logo: "/logos/pipigx.png",
+    logo: "/logos/pipigx.svg",
   },
   ppxia: {
     name: "皮皮虾",
@@ -80,25 +80,28 @@ export const VIDEO_PLATFORMS = {
     emoji: "🍉",
     color: "#ff6348",
     gradient: "from-[#ff6348] to-[#ff7f50]",
+    logo: "/logos/xigua.svg",
   },
   zuiyou: {
     name: "最右",
     emoji: "➡️",
     color: "#5f27cd",
     gradient: "from-[#5f27cd] to-[#341f97]",
-    logo: "/logos/zuiyou.png",
+    logo: "/logos/zuiyou.svg",
   },
   quanmin: {
     name: "度小视",
     emoji: "📲",
     color: "#3742fa",
     gradient: "from-[#3742fa] to-[#2f3542]",
+    logo: "/logos/quanmin.svg",
   },
   lishipin: {
     name: "梨视频",
     emoji: "🍐",
     color: "#2ed573",
     gradient: "from-[#2ed573] to-[#7bed9f]",
+    logo: "/logos/lishipin.svg",
   },
   huya: {
     name: "虎牙",
@@ -110,14 +113,16 @@ export const VIDEO_PLATFORMS = {
   acfun: {
     name: "AcFun",
     emoji: "🅰️",
-    color: "#fd79a8",
-    gradient: "from-[#fd79a8] to-[#fdcb6e]",
+    color: "#fd4c5d",
+    gradient: "from-[#fd4c5d] to-[#fdcb6e]",
+    logo: "/logos/acfun.svg",
   },
   meipai: {
     name: "美拍",
     emoji: "💃",
     color: "#e056fd",
     gradient: "from-[#e056fd] to-[#686de0]",
+    logo: "/logos/meipai.svg",
   },
   doupai: {
     name: "逗拍",
@@ -130,24 +135,28 @@ export const VIDEO_PLATFORMS = {
     emoji: "🎤",
     color: "#fc5c65",
     gradient: "from-[#fc5c65] to-[#fd9644]",
+    logo: "/logos/quanminkge.svg",
   },
   sixroom: {
     name: "六间房",
     emoji: "6️⃣",
     color: "#a55eea",
     gradient: "from-[#a55eea] to-[#8854d0]",
+    logo: "/logos/sixroom.svg",
   },
   xinpianchang: {
     name: "新片场",
     emoji: "🎞️",
     color: "#26de81",
     gradient: "from-[#26de81] to-[#20bf6b]",
+    logo: "/logos/xinpianchang.svg",
   },
   haokan: {
     name: "好看视频",
     emoji: "👀",
     color: "#45aaf2",
     gradient: "from-[#45aaf2] to-[#4b7bec]",
+    logo: "/logos/haokan.svg",
   },
   twitter: {
     name: "X (Twitter)",
@@ -161,7 +170,7 @@ export const VIDEO_PLATFORMS = {
     emoji: "🎶",
     color: "#010101",
     gradient: "from-[#010101] to-[#25f4ee]",
-    logo: "/logos/tiktok-white.svg",
+    logo: "/logos/tiktok.svg",
   },
 } as const;
 

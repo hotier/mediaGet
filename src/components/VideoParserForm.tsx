@@ -431,7 +431,8 @@ export default function VideoParserForm({
                 <Button
                   type="button"
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
+                  className="hover:text-error hover:bg-error/10"
                   onClick={handleClear}>
                   <X />
                   清空
