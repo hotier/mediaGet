@@ -2,6 +2,7 @@
 import React from "react";
 import Image from "next/image";
 import { ApiResponse, ParsedVideoItem } from "@/types/api";
+import { sanitizeFilename } from "@/utils/filename";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
@@ -33,10 +34,11 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
     const qualityLabel =
       label ?? (qs?.length ? (qs[0]?.label ?? "") : "");
     const labelPart = qualityLabel ? `-${qualityLabel.replace(/\s+/g, "")}` : "";
-    const titlePart = (item.title || `P${index + 1}`)
-      .replace(/[\\/:*?"<>|\r\n]/g, "_")
-      .slice(0, 40);
-    return `bilibili-${parsed?.author || "up"}-P${index + 1}-${titlePart}${labelPart}.mp4`;
+    const titlePart = sanitizeFilename(item.title || `P${index + 1}`, 40);
+    return `bilibili-${sanitizeFilename(
+      parsed?.author || "up",
+      20
+    )}-P${index + 1}-${titlePart}${labelPart}.mp4`;
   };
 
   // 数字缩写：>1万 → x.x万 / xx万，其余千分位
@@ -81,36 +83,36 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
             <div className="flex-1 min-w-0">
               {parsed?.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-secondary">UP主</span>
+                  <span className="text-[13px] text-secondary">UP主</span>
                   {parsed.authorUrl ? (
                     <a
                       href={parsed.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`打开 ${parsed.author} 的B站主页`}
-                      className="text-sm font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
                       {parsed.author}
                     </a>
                   ) : (
-                    <span className="text-sm font-medium text-accent truncate">
+                    <span className="text-[13px] font-medium text-accent truncate">
                       {parsed.author}
                     </span>
                   )}
                 </div>
               )}
               {parsed?.authorId && (
-                <p className="mt-0.5 text-xs text-muted truncate">
+                <p className="mt-0.5 text-[13px] text-muted truncate">
                   UID：{parsed.authorId}
                 </p>
               )}
               {parsed?.sign && (
-                <p className="mt-0.5 flex items-start gap-1 text-xs text-muted">
+                <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
                   <span className="min-w-0 line-clamp-2">{parsed.sign}</span>
                 </p>
               )}
               {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
                 {upBadges.map(
                   (badge) =>
                     badge.value != null &&
@@ -146,6 +148,7 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
           accent="blue"
           tall
           inline
+          parts={videoItems.length > 1 ? videoItems : undefined}
           downloadText="下载视频"
           onDownloadClick={scrollToDownload}
         />

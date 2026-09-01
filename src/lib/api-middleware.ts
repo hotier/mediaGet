@@ -199,8 +199,11 @@ export const createApiHandler = (
       );
     };
 
-    // 检查速率限制
-    if (!rateLimit(clientIP)) {
+    // 检查速率限制。
+    // 内部平台转发（x-parse-internal，即 unifiedParser 经 platformRoutes 调用
+    // /api/parser 的请求）不再重复计数：外层统一入口已计一次，且内部 Request
+    // 没有 IP 头会记到 'unknown' 桶，多次解析会把该桶打满导致误判 429。
+    if (!isInternalRequest && !rateLimit(clientIP)) {
       return respond(errorResponse("请求过于频繁，请稍后再试", 429), safeStatus(429));
     }
 

@@ -11,6 +11,7 @@ import {
   QsMusicVideo,
   PipigxVideo,
   PpxiaVideo,
+  TwitterVideo,
   GenericParsedVideo,
 } from "./index";
 
@@ -40,6 +41,7 @@ export const platformRenderers: Partial<
   qsmusic: QsMusicVideo,
   pipigx: PipigxVideo,
   ppxia: PpxiaVideo,
+  twitter: TwitterVideo,
 };
 
 /** 按平台选择渲染组件；未注册的平台一律走通用渲染 */

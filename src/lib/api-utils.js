@@ -87,36 +87,73 @@ export const setCacheResponse = (url, data) => {
   logger.log('Cache set for:', url.substring(0, 50) + '...');
 };
 
-// 速率限制相关配置
-export const rateLimit = (() => {
-  const requests = new Map();
-  const WINDOW_SIZE = 60000; // 1分钟
-  const MAX_REQUESTS = 60; // 每分钟最多60次请求（视频播放+图片代理会产生大量请求）
+// 速率限制相关配置（per-IP 滑动窗口）
+const RATE_LIMIT_WINDOW = 60000; // 1分钟
+const RATE_LIMIT_MAX = 60; // 每分钟最多60次请求（视频播放+图片代理会产生大量请求）
 
-  return (ip) => {
-    // Vitest 单测会短时间触发大量解析请求，避免误触生产限流逻辑
-    if (process.env.VITEST === "true") {
-      return true;
-    }
-    const now = Date.now();
-    // 取 x-forwarded-for 的第一个 IP（真实客户端 IP）
-    const realIp = ip.split(",")[0].trim();
-    const userRequests = requests.get(realIp) || [];
+// Next.js dev 下每个 API route 是独立 webpack chunk，api-utils.js 可能被实例化多份：
+// 解析请求把计数写进实例 A 的 Map，rate-limit 查询读实例 B 的 Map，永远看不到计数
+// （现象：解析后限流配额仍显示满额）。挂到 globalThis 强制所有路由共享同一份状态，
+// 生产单实例/单 isolate 内同样共享。注意跨进程/跨 isolate 仍各自独立（内存限流固有特性）。
+const RATE_LIMIT_STATE_KEY = "__mediaGetRateLimitRequests__";
+const rateLimitRequests =
+  globalThis[RATE_LIMIT_STATE_KEY] || (globalThis[RATE_LIMIT_STATE_KEY] = new Map()); // ip -> number[]（时间戳）
 
-    // 清理过期请求
-    const recentRequests = userRequests.filter(time => now - time < WINDOW_SIZE);
+/** 取 x-forwarded-for 的第一个 IP（真实客户端 IP） */
+function normalizeClientIp(ip) {
+  return String(ip || "").split(",")[0].trim();
+}
 
-    if (recentRequests.length >= MAX_REQUESTS) {
-      logger.warn(`Rate limit exceeded for IP: ${realIp}`);
-      return false; // 超出限制
-    }
+/** 清理过期请求并返回窗口内的请求时间戳 */
+function pruneRateLimit(realIp, now) {
+  const list = rateLimitRequests.get(realIp) || [];
+  const recent = list.filter(time => now - time < RATE_LIMIT_WINDOW);
+  if (recent.length !== list.length) {
+    rateLimitRequests.set(realIp, recent);
+  }
+  return recent;
+}
 
-    recentRequests.push(now);
-    requests.set(realIp, recentRequests);
-    logger.log(`Request allowed for IP: ${realIp}, count: ${recentRequests.length}/${MAX_REQUESTS}`);
-    return true; // 允许请求
+export const rateLimit = (ip) => {
+  // Vitest 单测会短时间触发大量解析请求，避免误触生产限流逻辑
+  if (process.env.VITEST === "true") {
+    return true;
+  }
+  const now = Date.now();
+  const realIp = normalizeClientIp(ip);
+  const recentRequests = pruneRateLimit(realIp, now);
+
+  if (recentRequests.length >= RATE_LIMIT_MAX) {
+    logger.warn(`Rate limit exceeded for IP: ${realIp}`);
+    return false; // 超出限制
+  }
+
+  recentRequests.push(now);
+  rateLimitRequests.set(realIp, recentRequests);
+  logger.log(`Request allowed for IP: ${realIp}, count: ${recentRequests.length}/${RATE_LIMIT_MAX}`);
+  return true; // 允许请求
+};
+
+/**
+ * 查询指定 IP 的限流状况（只读，不消耗配额）。
+ * 滑动窗口没有严格「重置点」，resetsInMs 取最早一次请求移出窗口的时间。
+ */
+export const getRateLimitStatus = (ip) => {
+  if (process.env.VITEST === "true") {
+    return { used: 0, limit: RATE_LIMIT_MAX, remaining: RATE_LIMIT_MAX, resetsInMs: 0 };
+  }
+  const now = Date.now();
+  const realIp = normalizeClientIp(ip);
+  const recent = pruneRateLimit(realIp, now);
+  const resetsInMs =
+    recent.length > 0 ? Math.max(0, recent[0] + RATE_LIMIT_WINDOW - now) : 0;
+  return {
+    used: recent.length,
+    limit: RATE_LIMIT_MAX,
+    remaining: Math.max(0, RATE_LIMIT_MAX - recent.length),
+    resetsInMs,
   };
-})();
+};
 
 // URL 验证函数
 export const isValidUrl = (string) => {

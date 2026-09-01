@@ -88,8 +88,8 @@ function formatDuration(value: unknown): string | undefined {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** 内容类型英文 → 中文 */
-function formatType(value: unknown): string | undefined {
+/** 内容类型英文 → 中文；视频 + 图集并存时显示「视频 + 图文」 */
+function formatType(value: unknown, data: ParseData): string | undefined {
   const map: Record<string, string> = {
     video: "视频",
     image: "图文 / 图集",
@@ -97,7 +97,12 @@ function formatType(value: unknown): string | undefined {
     text: "纯文字",
   };
   const v = String(value ?? "");
-  return map[v] || undefined;
+  const label = map[v];
+  if (!label) return undefined;
+  if (v === "video" && Array.isArray(data?.images) && data.images.length > 0) {
+    return "视频 + 图文";
+  }
+  return label;
 }
 
 /** 版权（bilibili）：1=自制 2=转载 */
@@ -247,11 +252,21 @@ const PLATFORM_FIELDS: Record<string, FieldDef[]> = {
     { key: "like", label: "点赞", format: formatCount },
     { key: "reply", label: "评论", format: formatCount },
     { key: "share", label: "转发", format: formatCount },
+    { key: "videoCount", label: "分P数量", format: formatVideoCount },
     TYPE_FIELD,
   ],
   qsmusic: [
     { key: "name", label: "歌曲" },
     { key: "core", label: "来源" },
+    TYPE_FIELD,
+  ],
+  // 博主卡已展示：昵称 / 用户名 / 简介 / 关注 / 粉丝，这里只保留推文内容相关信息
+  twitter: [
+    { key: "time", label: "发布时间", format: formatTime },
+    { key: "like", label: "点赞", format: formatCount },
+    { key: "retweets", label: "转发", format: formatCount },
+    { key: "replies", label: "评论", format: formatCount },
+    { key: "views", label: "查看", format: formatCount },
     TYPE_FIELD,
   ],
 };

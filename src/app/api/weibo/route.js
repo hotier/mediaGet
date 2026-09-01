@@ -129,18 +129,27 @@ async function getVisitorCookie() {
     const text2 = await res2.text();
     const sub = text2.match(/"sub":"([^"]+)"/)?.[1];
     const subp = text2.match(/"subp":"([^"]+)"/)?.[1];
-    if (!sub) return "";
+    if (!sub) {
+      console.log(`[weibo] visitor cookie failed: stage2 status=${res2.status} no SUB`);
+      return "";
+    }
 
     const cookie = `SUB=${sub}${subp ? `; SUBP=${subp}` : ""}`;
     visitorCookieCache = cookie;
     visitorCookieExpireAt = Date.now() + VISITOR_COOKIE_TTL_MS;
+    console.log(`[weibo] visitor cookie ok (SUB acquired, cached ${VISITOR_COOKIE_TTL_MS / 60000}min)`);
     return cookie;
-  } catch {
+  } catch (e) {
+    console.log(`[weibo] visitor cookie error: ${e?.message || e}`);
     return "";
   }
 }
 
-async function fetchJson(url, options = {}) {
+/**
+ * 通用 JSON 请求。label 非空时打印生产可见诊断日志（Vercel 等无本地控制台的环境
+ * 也能从函数日志定位是哪一步失败：访客 Cookie / component / m.weibo.cn）。
+ */
+async function fetchJson(url, options = {}, label = "") {
   try {
     const res = await fetch(url, {
       ...options,
@@ -152,9 +161,13 @@ async function fetchJson(url, options = {}) {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const ct = res.headers.get("content-type") || "";
+    if (label) console.log(`[weibo] ${label} status=${res.status} ct=${ct.split(";")[0]}`);
     if (!res.ok && !ct.includes("json")) return null;
-    return await res.json();
-  } catch {
+    const json = await res.json();
+    if (label) console.log(`[weibo] ${label} json keys=[${Object.keys(json).join(", ")}]`);
+    return json;
+  } catch (e) {
+    if (label) console.log(`[weibo] ${label} error=${e?.message || e}`);
     return null;
   }
 }
@@ -193,11 +206,46 @@ function normalizeImageUrl(u) {
     .replace(/\/orj360\//, "/large/");
 }
 
-/** 从 mblog 对象提取图片列表（pics[].large.url，兼容字符串项） */
+/** 从 page_info 提取视频直链（media_url / media_info 多级降级，兼容单视频与多视频数组元素） */
+function pickMediaUrl(pi) {
+  if (!pi) return "";
+  const media = pi.media_info || {};
+  return (
+    pi.media_url ||
+    media.stream_url_hd ||
+    media.stream_url ||
+    media.mp4_hd_url ||
+    media.mp4_720p_mp4 ||
+    media.mp4_hd_mp4 ||
+    media.mp4_ld_mp4 ||
+    media.mp4_url ||
+    media.mp4_sd_url ||
+    media.hd_url ||
+    media.ld_url ||
+    media.origin_url ||
+    ""
+  );
+}
+
+/** 视频时长（秒）→ "mm:ss" / "h:mm:ss"，无效返回空串 */
+function formatSeconds(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const s = Math.round(n);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (x) => String(x).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
+}
+
+/** 从 mblog 对象提取图片列表（pics[].large.url，兼容字符串项；过滤视频项） */
 function extractImagesFromMblog(mblog) {
   if (!Array.isArray(mblog?.pics)) return [];
   const images = [];
   for (const p of mblog.pics) {
+    // 多视频帖的每个分P是 pics 里的视频项（type=video + videoSrc 直链），不是图集内容
+    if (p?.type === "video" || p?.videoSrc) continue;
     const raw =
       (typeof p === "string" ? p : "") ||
       p?.large?.url ||
@@ -207,6 +255,81 @@ function extractImagesFromMblog(mblog) {
     if (url) images.push(url);
   }
   return images;
+}
+
+/**
+ * 从 mblog 提取视频列表。
+ * 多视频帖：每个分P都在 pics 里（type=video + videoSrc 直链），逐个提取；
+ * pics 无视频时（图文混排单视频 / 纯单视频），用 page_info 兜底
+ * （page_info 仅含主视频且 URL 与 pics[0] 同视频但清晰度不同，不能简单按 URL 去重合并）。
+ */
+function extractVideosFromMblog(mblog) {
+  const videos = [];
+  // 1) pics 视频项：多视频帖的所有分P（含主视频）都在这里
+  for (const p of Array.isArray(mblog?.pics) ? mblog.pics : []) {
+    const videoSrc = normalizeUrl(p?.videoSrc || "");
+    if (!videoSrc) continue;
+    const coverUrl = normalizeImageUrl(p?.large?.url || p?.url || "");
+    videos.push({
+      title: "",
+      url: videoSrc,
+      duration: p?.duration ? Number(p.duration) : undefined,
+      durationFormat: formatSeconds(p?.duration),
+      cover: proxifyImage(coverUrl),
+    });
+  }
+  // 2) page_info 兜底：pics 无视频项时，提取 page_info 主视频（兼容对象/数组）
+  if (videos.length === 0) {
+    const pageInfos = Array.isArray(mblog?.page_info)
+      ? mblog.page_info
+      : mblog?.page_info
+        ? [mblog.page_info]
+        : [];
+    for (const pi of pageInfos) {
+      const mediaUrl = normalizeUrl(pickMediaUrl(pi));
+      if (!mediaUrl) continue;
+      const media = pi.media_info || {};
+      const coverUrl = normalizeImageUrl(media.poster || pi.page_pic?.url || "");
+      videos.push({
+        title: (pi.content1 || pi.title || "").trim(),
+        url: mediaUrl,
+        duration: media.duration ? Number(media.duration) : undefined,
+        durationFormat: formatSeconds(media.duration),
+        cover: proxifyImage(coverUrl),
+      });
+    }
+  }
+  return videos;
+}
+
+/**
+ * 新浪图片去重键：sinaimg 同一张图会以多种尺寸标识出现
+ * （thumb150 / bmiddle / orj360 / orj480 / large），文件名相同。
+ * 取 URL 最后一段文件名（小写）作为比较键，跨尺寸识别同一张图。
+ */
+function sinaImageKey(u) {
+  const url = normalizeUrl(u);
+  if (!url) return "";
+  const m = /\/[^/]+\.(?:jpe?g|png|gif|webp)$/i.exec(url);
+  return m ? m[0].toLowerCase() : url.toLowerCase();
+}
+
+/**
+ * 把第三方图片 URL 包成站内代理路径，绕过 Referer 防盗链。
+ * 微博图床（sinaimg / weibocdn）在 https 页面直链加载会 403，
+ * /api/image 代理会带 Referer: weibo.com 回源（与小红书/B站/快手处理一致）。
+ */
+function proxifyImage(url) {
+  if (!url) return "";
+  return `/api/image?url=${encodeURIComponent(url)}`;
+}
+
+/** 从站内图片代理路径还原原始 URL（封面去重 / 兜底回源时需要） */
+function decodeProxiedUrl(u) {
+  const prefix = "/api/image?url=";
+  return typeof u === "string" && u.startsWith(prefix)
+    ? decodeURIComponent(u.slice(prefix.length))
+    : u;
 }
 
 /**
@@ -223,11 +346,14 @@ function extractFromMWeibo(json) {
   const title = text.slice(0, 120);
   const user = mblog.user || {};
   const author = user.screen_name || "";
-  const avatar = normalizeUrl(
-    user.avatar_large ||
-      user.avatar_hd ||
-      user.profile_image_url ||
-      ""
+  // 头像走站内代理：sinaimg 直链在 https 页面加载会 403（防盗链）
+  const avatar = proxifyImage(
+    normalizeUrl(
+      user.avatar_large ||
+        user.avatar_hd ||
+        user.profile_image_url ||
+        ""
+    )
   );
   const time = mblog.created_at || "";
   // 博主主页公开信息（对齐小红书博主卡：可点主页 + 简介 + 关注/粉丝）
@@ -256,33 +382,35 @@ function extractFromMWeibo(json) {
     share,
   };
 
-  // 1) 视频：page_info.media_info 多级降级取直链
-  const pageInfo = mblog.page_info || {};
-  const media = pageInfo.media_info || {};
-  const mediaUrl =
-    pageInfo.media_url ||
-    media.stream_url_hd ||
-    media.stream_url ||
-    media.mp4_hd_url ||
-    media.mp4_720p_mp4 ||
-    media.mp4_hd_mp4 ||
-    media.mp4_ld_mp4 ||
-    media.mp4_url ||
-    media.mp4_sd_url ||
-    media.hd_url ||
-    media.ld_url ||
-    media.origin_url;
-  if (mediaUrl) {
+  // 1) 视频：多视频帖每个分P在 pics 里（type=video + videoSrc 直链），
+  //    page_info 仅为主视频，pics 有视频项即优先（其 URL 与 pics[0] 同视频但清晰度不同）。
+  //    图集 = pics 中非视频项；各视频封面（同文件不同尺寸标识）再按文件名剔除，防止残留。
+  const videoItems = extractVideosFromMblog(mblog);
+  if (videoItems.length > 0) {
+    const videoCoverKeys = new Set();
+    for (const v of videoItems) {
+      const k = sinaImageKey(decodeProxiedUrl(v.cover || ""));
+      if (k) videoCoverKeys.add(k);
+    }
+    const images = extractImagesFromMblog(mblog)
+      .filter((u) => {
+        const k = sinaImageKey(u);
+        return !k || !videoCoverKeys.has(k);
+      })
+      .map(proxifyImage);
+    const first = videoItems[0];
     return {
       ...base,
-      cover: normalizeUrl(media.poster || pageInfo.page_pic?.url || ""),
-      url: normalizeUrl(mediaUrl),
+      cover: first.cover,
+      url: first.url,
+      images: images.length > 0 ? images : undefined,
+      videos: videoItems.length > 1 ? videoItems : undefined,
       type: "video",
     };
   }
 
-  // 2) 图片：mblog.pics 图集
-  const images = extractImagesFromMblog(mblog);
+  // 2) 图片：mblog.pics 图集（返回时统一包成站内代理，绕过 sinaimg 防盗链）
+  const images = extractImagesFromMblog(mblog).map(proxifyImage);
   if (images.length > 0) {
     return {
       ...base,
@@ -327,9 +455,9 @@ function extractFromComponent(json) {
   if (!url) return null;
   return {
     title: (data.title || "").trim(),
-    cover: normalizeUrl(data.cover_image || ""),
+    cover: proxifyImage(normalizeUrl(data.cover_image || "")),
     author: data.author || data.nickname || "",
-    avatar: normalizeUrl(data.avatar || ""),
+    avatar: proxifyImage(normalizeUrl(data.avatar || "")),
     time: data.real_date ? new Date(Number(data.real_date) * 1000).toISOString() : "",
     url,
     mid: data.mid ? String(data.mid) : "",
@@ -360,7 +488,8 @@ async function weibo(url) {
       body: `data=${encodeURIComponent(
         `{"Component_Play_Playinfo":{"oid":"${id}"}}`
       )}`,
-    }
+    },
+    "component"
   );
   const fromC = extractFromComponent(cJson);
   if (fromC && fromC.url) {
@@ -378,12 +507,38 @@ async function weibo(url) {
             "MWeibo-Pwa": "1",
             Accept: "application/json, text/plain, */*",
           },
-        }
+        },
+        "mweibo-meta"
       );
       const fromM = extractFromMWeibo(mJson);
       if (fromM) {
         // 视频场景：url/type 以 component 结果为准（fromM 可能因无视频被归类为 image/text）
-        meta = { ...fromC, ...fromM, url: fromC.url, type: "video" };
+        // 图集若包含视频封面（component 主视频封面 + 多视频各分P封面），按文件名一并剔除。
+        // 注意：此时封面 / fromM.images 均已包成代理路径，先解码还原原始 URL 再比较。
+        const videoCoverKeys = new Set();
+        const firstKey = sinaImageKey(decodeProxiedUrl(fromC.cover));
+        if (firstKey) videoCoverKeys.add(firstKey);
+        for (const v of Array.isArray(fromM.videos) ? fromM.videos : []) {
+          const k = sinaImageKey(decodeProxiedUrl(v?.cover || ""));
+          if (k) videoCoverKeys.add(k);
+        }
+        const images = Array.isArray(fromM.images)
+          ? fromM.images.filter((u) => {
+              const k = sinaImageKey(decodeProxiedUrl(u));
+              return !k || !videoCoverKeys.has(k);
+            })
+          : undefined;
+        meta = {
+          ...fromC,
+          ...fromM,
+          url: fromC.url,
+          type: "video",
+          images: images && images.length > 0 ? images : undefined,
+          videos:
+            Array.isArray(fromM.videos) && fromM.videos.length > 1
+              ? fromM.videos
+              : undefined,
+        };
       }
     }
     // 剔除 mid 字段（避免冗余，且不在响应中暴露微博内部 id）
@@ -404,7 +559,7 @@ async function weibo(url) {
       "MWeibo-Pwa": "1",
       Accept: "application/json, text/plain, */*",
     },
-  });
+  }, "mweibo-fallback");
   const fromM = extractFromMWeibo(mJson);
   // 视频 / 图片 / 纯文字微博都算解析成功（data.type 区分媒体类型），
   // 只有完全拿不到内容时才走 null → 外层统一报「解析失败」

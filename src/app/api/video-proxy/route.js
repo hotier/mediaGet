@@ -47,6 +47,23 @@ function isWeiboHost(hostname) {
   );
 }
 
+/** X/Twitter 视频 CDN：拒绝「到末尾」的开放区间 Range（bytes=0- / bytes=N-） */
+function isTwimgHost(hostname) {
+  return hostname === "twimg.com" || hostname.endsWith(".twimg.com");
+}
+
+/**
+ * 判断 Range 是否为「到末尾」的开放区间（无结束字节，如 bytes=0- / bytes=N-）。
+ * 浏览器 <video> 的首次加载请求正是 bytes=0-，X 的 video.twimg.com 对这类请求
+ * 会直接重置连接/拒绝（403），导致内嵌播放「无法播放媒体」；有限区间
+ * （bytes=a-b，播放器 seek 精确定位）则正常支持。非标准 Range 按开放处理。
+ */
+function isOpenEndedRange(range) {
+  const m = /^bytes=(\d*)-(\d*)$/i.exec((range || "").trim());
+  if (!m) return true;
+  return m[2] === "";
+}
+
 export async function GET(request) {
   // IP 黑名单：视频代理返回二进制流，无法套用解析接口的 JSON 蜜罐，
   // 此处对黑名单 IP 保持 403（视频代理只是前端加载资源的通道，不承载解析宣传）。
@@ -69,6 +86,9 @@ export async function GET(request) {
       .replace(/[\\/:*?"<>|\r\n]/g, "_")
       .replace(/\.{2,}/g, "_")
       .replace(/[^\w.\-\u4e00-\u9fa5 ]/g, "_")
+      .replace(/[.\s]+$/g, "")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
       .trim()
       .slice(0, 120) || "video.mp4";
 
@@ -100,53 +120,81 @@ export async function GET(request) {
     headers.Referer = "https://weibo.com/";
   }
 
-  // 透传客户端的 Range 头（浏览器播放/拖动进度条必需）
+  // 透传客户端的 Range 头（浏览器播放/拖动进度条必需）。
+  // twimg 特殊：开放区间 Range（bytes=0- / bytes=N-）会被上游拒绝（重置连接），
+  // 浏览器 <video> 首次加载正是 bytes=0- —— 对 twimg 忽略开放区间 Range，
+  // 让上游返回 200 完整文件可正常播放；有限区间（seek 精确定位）照常透传。
   const range = request.headers.get("range");
-  if (range) {
+  if (range && !(isTwimgHost(target.hostname) && isOpenEndedRange(range))) {
     headers.Range = range;
   }
 
   const FIRST_BYTE_TIMEOUT_MS = 30000;
-  const upstreamController = new AbortController();
   const FIRST_BYTE_TIMEOUT = new Error("first-byte timeout");
+  // twimg 连接不稳定（间歇性重置/首字节超时/403）：用更短首字节超时 + 失败重试，
+  // 瞬时失败重试大概率恢复，显著提升 X 视频内嵌播放成功率。
+  const isTwimg = isTwimgHost(target.hostname);
+  const TWIMG_FIRST_BYTE_TIMEOUT_MS = 8000;
+  const MAX_TWIMG_ATTEMPTS = 3; // 含首次，最多 3 次尝试
 
   // 首字节超时：只覆盖到收到上游响应头为止。
   // 不能用 AbortSignal.timeout() 一刀切——它会连同 body 流一起掐断，
   // 大视频传输超过 30s 就会在中途断流（failed to pipe response / TimeoutError）。
-  let timer = setTimeout(
-    () => upstreamController.abort(FIRST_BYTE_TIMEOUT),
-    FIRST_BYTE_TIMEOUT_MS
-  );
-  // 客户端断开（关页面 / 播放器换 Range 重新请求）时中止上游，避免后台白拉流量
-  request.signal.addEventListener(
-    "abort",
-    () => upstreamController.abort(new Error("client aborted")),
-    { once: true }
-  );
+  const maxAttempts = isTwimg ? MAX_TWIMG_ATTEMPTS : 1;
+  let upstream = null;
+  let upstreamError = null;
+  let attemptController = null;
 
-  let upstream;
-  try {
-    upstream = await fetch(target.href, {
-      headers,
-      signal: upstreamController.signal,
-    });
-  } catch (e) {
-    clearTimeout(timer);
-    if (upstreamController.signal.reason === FIRST_BYTE_TIMEOUT) {
-      logger.warn(`video-proxy 上游首字节超时: host=${target.hostname}`);
-      return new Response("Upstream timeout", { status: 504 });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      // 短暂退避后重试
+      await new Promise((r) => setTimeout(r, 400 * (attempt - 1)));
     }
+    attemptController = new AbortController();
+    const attemptTimeout = setTimeout(
+      () => attemptController.abort(FIRST_BYTE_TIMEOUT),
+      isTwimg ? TWIMG_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+    );
+    // 客户端断开（关页面 / 播放器换 Range 重新请求）时中止上游，避免后台白拉流量
+    request.signal.addEventListener(
+      "abort",
+      () => attemptController.abort(new Error("client aborted")),
+      { once: true }
+    );
+    try {
+      upstream = await fetch(target.href, {
+        headers,
+        signal: attemptController.signal,
+      });
+      clearTimeout(attemptTimeout);
+      if (upstream.ok || upstream.status === 206) break;
+      upstreamError = new Error(`upstream status ${upstream.status}`);
+      // 非 2xx：twimg 可能瞬时 403，重试；其他 host 立即失败
+      if (!isTwimg) break;
+    } catch (e) {
+      clearTimeout(attemptTimeout);
+      upstreamError = e;
+      if (request.signal.aborted) break; // 客户端已断开，不再重试
+      if (!isTwimg && attemptController.signal.reason === FIRST_BYTE_TIMEOUT) break;
+      // twimg 的瞬时失败（重置/超时/403）继续下一轮重试
+    }
+  }
+
+  if (!upstream) {
     if (request.signal.aborted) {
       logger.warn(`video-proxy 客户端中断: host=${target.hostname}`);
       return new Response("Client aborted", { status: 499 });
     }
-    logger.error(`video-proxy upstream fetch failed: ${e.message}`);
-    return new Response(`Upstream fetch failed: ${e.message}`, {
+    if (attemptController?.signal.reason === FIRST_BYTE_TIMEOUT) {
+      logger.warn(`video-proxy 上游首字节超时: host=${target.hostname}`);
+      return new Response("Upstream timeout", { status: 504 });
+    }
+    logger.error(`video-proxy upstream fetch failed: ${upstreamError?.message}`);
+    return new Response(`Upstream fetch failed: ${upstreamError?.message}`, {
       status: 502,
     });
   }
   // 响应头已到，首字节超时完成使命，传输阶段改用空闲超时
-  clearTimeout(timer);
   if (!upstream.ok && upstream.status !== 206) {
     logger.warn(`video-proxy upstream error: ${upstream.status} url=${target.hostname}`);
     return new Response(`Upstream error: ${upstream.status}`, {
@@ -155,9 +203,11 @@ export async function GET(request) {
   }
 
   // 空闲超时：传输中只要数据还在流动就放行，持续 30s 无新数据才中止
+  // timer 在重试重构中随旧声明一并删除，这里显式声明（严格模式下赋值未声明变量会抛 ReferenceError）
+  let timer;
   const armIdleTimer = () => {
     timer = setTimeout(
-      () => upstreamController.abort(new Error("upstream idle timeout")),
+      () => attemptController.abort(new Error("upstream idle timeout")),
       FIRST_BYTE_TIMEOUT_MS
     );
   };

@@ -14,16 +14,16 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 /**
- * 微博结果卡片 —— 结构对齐小红书标准：
- * 博主信息卡 → 视频/图集 → 博文（可复制）→ 作品信息面板。
- * 博主卡展示主页公开信息（昵称可点主页 / 微博号 / 简介 / 关注 / 粉丝），
- * 作品信息面板只保留与内容相关的字段（发布时间 / 点赞 / 评论 / 转发 / 类型）。
+ * X (Twitter) 结果卡片 —— 结构对齐微博标准：
+ * 博主信息卡 → 视频（多P切换/下载）→ 图集 → 推文（可复制）→ 作品信息面板。
+ * 多视频推文（最多 4 个媒体）由后端解析为 videos 列表，播放卡内分P切换，
+ * 下载区逐P列出（对齐 B 站/微博心智）；视频+图片混合推文两者叠加展示。
  */
-interface WeiboVideoProps {
+interface TwitterVideoProps {
   data: ApiResponse;
 }
 
-export default function WeiboVideo({ data }: WeiboVideoProps) {
+export default function TwitterVideo({ data }: TwitterVideoProps) {
   const [imageLoading, setImageLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   // 一键下载全部分P视频：触发期间禁用按钮防重复
@@ -33,73 +33,48 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
     return null;
   }
 
-  const weiboData = data.data as ParseData;
-  const images = weiboData.images?.filter(Boolean) || [];
-  // 多视频：后端把多视频帖各视频直链解析为 videos，播放卡片内分P切换；
+  const d = data.data as ParseData;
+  const images = d.images?.filter(Boolean) || [];
+  // 多视频：后端把多视频推文各视频直链解析为 videos，播放卡片内分P切换；
   // 单视频/图集时无此字段，仍走 url / images。
-  const videos = (weiboData.videos || []).filter((v) => v && v.url);
+  const videos = (d.videos || []).filter((v) => v && v.url);
   const hasMultiVideo = videos.length > 1;
   // 媒体渲染与 type 解耦：有视频直链就渲染视频，有图片就渲染图集，两者可叠加
-  // （图文混合微博：视频 + 多图、文字 + 多图）
-  // 注意：image 类型时 url 指向第一张图（非视频直链），须排除，否则会误渲染视频卡
-  const hasVideo = !!weiboData.url && weiboData.type !== "image";
+  const hasVideo = !!d.url && d.type !== "image";
   const hasImages = images.length > 0;
-  const isText = !hasVideo && !hasImages;
 
-  // 计数解析：兼容数字 / 数字字符串 / 中文单位字符串（"32.1万"、"1.2亿"）
-  const parseCount = (v: unknown): number => {
-    if (typeof v === "number") return Number.isFinite(v) ? v : Number.NaN;
-    if (typeof v === "string") {
-      const w = /^([\d.]+)\s*万$/.exec(v.trim());
-      if (w) return parseFloat(w[1]) * 10000;
-      const y = /^([\d.]+)\s*亿$/.exec(v.trim());
-      if (y) return parseFloat(y[1]) * 100000000;
-      return parseFloat(v);
-    }
-    return Number.NaN;
-  };
-
-  // 数字缩写：>1万 → x.x万 / xx万，其余千分位；无效或 ≤0 返回 undefined
+  // 数字缩写：>1万 → x.x万 / xx万，其余千分位（对齐小红书/微博博主卡）
   const formatCount = (n: number) =>
     n >= 10000
       ? `${(n / 10000).toFixed(n >= 1000000 ? 0 : 1)}万`
       : n.toLocaleString("zh-CN");
 
-  // 博主主页公开信息徽标：关注 / 粉丝（微博无「获赞」公开字段，缺失自动隐藏）
-  const authorBadges: { label: string; value?: number }[] = [
-    { label: "关注", value: weiboData.followingCount },
-    { label: "粉丝", value: weiboData.followerCount },
-  ];
-
-  const handleDownloadAll = async () => {
+  const handleDownloadAllImages = async () => {
     if (downloading || images.length === 0) return;
     setDownloading(true);
     try {
-      await downloadAllImages(images, `weibo-${weiboData.author || "图片"}`);
+      await downloadAllImages(images, `twitter-${d.author || "图片"}`);
     } finally {
       setDownloading(false);
     }
   };
 
-  // 净化文件名片段：共享工具见 @/utils/filename，移除文件系统不安全的字符并限长。
-  // 微博标题常为整段博文文案，可能含换行、引号、表情、零宽字符等，直接拼文件名容易出错。
-  // 下载文件名：weibo-作者-标题.mp4（作者 20 字、标题 30 字，走代理强制保存）
-  const downloadName = `weibo-${sanitizeFilename(
-    weiboData.author || "video",
+  // 下载文件名：twitter-作者-标题.mp4（走代理强制保存；标题 30 字，净化后拼接）
+  const downloadName = `twitter-${sanitizeFilename(
+    d.author || "video",
     20
-  )}-${sanitizeFilename(weiboData.title || "video", 30)}.mp4`;
+  )}-${sanitizeFilename(d.title || "video", 30)}.mp4`;
 
-  // 多分P下载文件名：weibo-作者-P{序号}-标题.mp4（带P序号，逐P下载不冲突）
+  // 多分P下载文件名：twitter-作者-P{序号}-标题.mp4（带P序号，逐P下载不冲突）
   const buildDownloadName = (index: number): string =>
-    `weibo-${sanitizeFilename(weiboData.author || "video", 20)}-P${
+    `twitter-${sanitizeFilename(d.author || "video", 20)}-P${
       index + 1
-    }-${sanitizeFilename(weiboData.title || "video", 30)}.mp4`;
+    }-${sanitizeFilename(d.title || "video", 30)}.mp4`;
 
-  // 播放卡「下载」按钮：多P时滚动定位到下方「下载选项」列表中对应分P的下载行，
-  // 而不是列表顶部——用户正在看/播放第几P，就跳到第几P的下载按钮
+  // 播放卡「下载」按钮：多P时滚动定位到下方「下载选项」列表中对应分P的下载行
   const scrollToDownload = (index: number) => {
     document
-      .getElementById(`weibo-download-${index}`)
+      .getElementById(`twitter-download-${index}`)
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
@@ -125,89 +100,79 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
   };
 
   return (
-    <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
-      {/* 博主信息卡：头像 + 昵称(可点击主页) + 微博号 + 简介 + 关注/粉丝（主页公开信息，缺失自动隐藏） */}
-      {(weiboData.avatar || weiboData.author) && (
+    <div className="space-y-5" style={{ touchAction: "pan-y" }}>
+      {/* 博主信息卡：头像 + 昵称 + 用户ID */}
+      {(d.avatar || d.author) && (
         <Card className="p-5">
           <div className="flex items-center gap-4">
-            {weiboData.avatar && (
-              <div className="relative flex-shrink-0">
-                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[#e6162d] to-[#ff4d6a] blur-sm opacity-50" />
-                <Image
-                  src={weiboData.avatar}
-                  alt={weiboData.author || ""}
-                  width={56}
-                  height={56}
-                  className="relative rounded-full border-2 border-glass-3"
-                  unoptimized
-                />
-              </div>
+            {d.avatar && (
+              <Image
+                src={d.avatar}
+                alt={d.author || ""}
+                width={56}
+                height={56}
+                className="rounded-full border-2 border-glass-3"
+                unoptimized
+              />
             )}
             <div className="flex-1 min-w-0">
-              {weiboData.author && (
+              {d.author && (
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">作者</span>
-                  {weiboData.authorUrl ? (
+                  {d.authorUrl ? (
                     <a
-                      href={weiboData.authorUrl}
+                      href={d.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${weiboData.author} 的微博主页`}
+                      title={`打开 ${d.author} 的 X 主页`}
                       className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {weiboData.author}
+                      {d.author}
                     </a>
                   ) : (
                     <span className="text-[13px] font-medium text-accent truncate">
-                      {weiboData.author}
+                      {d.author}
                     </span>
                   )}
                 </div>
               )}
-              {weiboData.authorId && (
+              {d.authorId && (
                 <p className="mt-0.5 text-[13px] text-muted truncate">
-                  微博号：{weiboData.authorId}
+                  用户名：{d.authorId}
                 </p>
               )}
-              {weiboData.sign && (
+              {d.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{weiboData.sign}</span>
+                  <span className="min-w-0 line-clamp-2">{d.sign}</span>
                 </p>
               )}
-              {/* 关注 / 粉丝（纯文本，左边缘与上方文字严格对齐） */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
-                {authorBadges.map((badge) => {
-                  const n = parseCount(badge.value);
-                  if (!Number.isFinite(n) || n <= 0) return null;
-                  return (
-                    <span
-                      key={badge.label}
-                      className="inline-flex items-center gap-1">
-                      <span className="text-muted">{badge.label}</span>
-                      <span className="font-semibold text-primary">
-                        {formatCount(n)}
-                      </span>
-                    </span>
-                  );
-                })}
-              </div>
+              {(d.followingCount != null && d.followingCount > 0) ||
+              (d.followerCount != null && d.followerCount > 0) ? (
+                <p className="mt-0.5 flex items-center gap-4 text-[13px] text-muted">
+                  {d.followingCount != null && d.followingCount > 0 && (
+                    <span>关注：{formatCount(d.followingCount)}</span>
+                  )}
+                  {d.followerCount != null && d.followerCount > 0 && (
+                    <span>粉丝：{formatCount(d.followerCount)}</span>
+                  )}
+                </p>
+              ) : null}
             </div>
             <div className="flex-shrink-0">
-              <PlatformIcon platform="weibo" size={40} rounded="rounded-xl" />
+              <PlatformIcon platform="twitter" size={40} rounded="rounded-xl" />
             </div>
           </div>
         </Card>
       )}
 
-      {/* 视频：封面 + 播放/下载（内嵌播放，直链走代理，体验与小红书一致） */}
-      {/* 多视频帖：分P切换条展示在播放卡片内，播放/封面跟随当前分P；
-          下载按钮多P时滚动定位到下方「下载选项」列表（与B站一致），单视频直接下载 */}
+      {/* 视频：封面 + 播放/下载。多视频推文：分P切换条在播放卡片内，
+          下载按钮多P时滚动定位到下方「下载选项」列表（与B站/微博一致） */}
       {hasVideo && (
         <VideoPosterCard
-          url={weiboData.url!}
-          cover={weiboData.cover}
-          alt={weiboData.title || "视频封面"}
-          accent="red"
+          url={d.url!}
+          cover={d.cover}
+          alt={d.title || "视频封面"}
+          accent="neutral"
           inline
           parts={hasMultiVideo ? videos : undefined}
           downloadName={downloadName}
@@ -216,8 +181,7 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
         />
       )}
 
-      {/* 图集：单图大图展示，多图网格（2/3/4 张自适应列数），点击打开原图 */}
-      {/* 图文混合时与视频叠加展示（视频在上、图集在下） */}
+      {/* 图集：单图大图展示，多图网格；视频+图片混合时与视频叠加展示 */}
       {hasImages && (
         <Card className="p-3">
           {images.length === 1 ? (
@@ -231,7 +195,7 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
               )}
               <Image
                 src={images[0]}
-                alt={weiboData.title || "图片"}
+                alt={d.title || "图片"}
                 fill
                 sizes="(max-width: 800px) 100vw, 800px"
                 className="object-cover"
@@ -258,12 +222,10 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                     href={imageUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
-                      images.length === 4 && index >= 2 ? "col-span-1" : ""
-                    }`}>
+                    className="relative aspect-square rounded-xl overflow-hidden group block bg-black">
                     <Image
                       src={imageUrl}
-                      alt={`${weiboData.title || "图片"} ${index + 1}`}
+                      alt={`${d.title || "图片"} ${index + 1}`}
                       fill
                       sizes="(max-width: 800px) 50vw, 400px"
                       className="object-cover transition-transform duration-500 group-hover:scale-105"
@@ -279,10 +241,10 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
           {/* 一键下载全部图片 */}
           <Button
             type="button"
-            onClick={handleDownloadAll}
+            onClick={handleDownloadAllImages}
             disabled={downloading}
             size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#e6162d] to-[#ff4d6a] hover:opacity-90">
+            className="mt-3 w-full bg-gradient-to-r from-[#14171a] to-[#657786] hover:opacity-90">
             {downloading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -298,21 +260,18 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
         </Card>
       )}
 
-      {/* 博文：媒体下方，可一键复制（与小红书文案卡片一致） */}
-      {(weiboData.desc || weiboData.title) && (
-        <CaptionBox
-          text={(weiboData.desc || weiboData.title)!}
-          title="博文"
-        />
+      {/* 推文文案：媒体下方，可一键复制 */}
+      {(d.desc || d.title) && (
+        <CaptionBox text={(d.desc || d.title)!} title="推文" />
       )}
 
-      {/* 微博信息：发布时间 / 点赞 / 评论 / 转发（博主卡已展示作者信息） */}
-      <ParseInfoPanel platform="weibo" data={weiboData} title="微博信息" />
+      {/* 作品信息：发布时间 / 时长 / 类型（博主卡已展示作者信息） */}
+      <ParseInfoPanel platform="twitter" data={d} title="推文信息" />
 
-      {/* 多P下载选项：分P逐条列出，每条一个下载按钮（微博每P单一清晰度直链，
+      {/* 多P下载选项：分P逐条列出，每条一个下载按钮（推特每P单一清晰度直链，
           无需B站的档位列表）。文件名带P序号，逐P下载互不覆盖 */}
       {hasVideo && hasMultiVideo && (
-        <Card id="weibo-download" className="p-5 scroll-mt-24">
+        <Card id="twitter-download" className="p-5 scroll-mt-24">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-primary flex items-center gap-2">
               <svg
@@ -355,7 +314,7 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
             {videos.map((item, index) => (
               <div
                 key={index}
-                id={`weibo-download-${index}`}
+                id={`twitter-download-${index}`}
                 className="flex items-center gap-3 rounded-xl bg-glass-2 hover:bg-glass-3 transition-colors duration-200 px-4 py-3 scroll-mt-24">
                 {item.cover && (
                   <Image
@@ -369,7 +328,7 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-primary truncate">
-                    P{index + 1}: {item.title || weiboData.title || "视频"}
+                    P{index + 1}: {item.title || d.title || "视频"}
                   </p>
                   {item.durationFormat && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -377,16 +336,16 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                         {item.durationFormat}
                       </span>
                       <span className="rounded-md bg-glass-2 px-1.5 py-0.5 text-[11px] text-accent">
-                        720P
+                        MP4
                       </span>
                     </div>
                   )}
                 </div>
-                {/* 下载按钮固定在行右侧，随分P紧凑排列（微博单清晰度，无需档位列表） */}
+                {/* 下载按钮固定在行右侧，随分P紧凑排列 */}
                 <Button
                   asChild
                   size="sm"
-                  className="flex-shrink-0 bg-gradient-to-r from-[#e6162d] to-[#ff4d6a] hover:opacity-90">
+                  className="flex-shrink-0 bg-gradient-to-r from-[#14171a] to-[#657786] hover:opacity-90">
                   <a
                     href={`/api/video-proxy?url=${encodeURIComponent(
                       item.url
@@ -402,15 +361,6 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
               </div>
             ))}
           </div>
-        </Card>
-      )}
-
-      {/* 纯文字微博：无媒体可下载，展示提示而非报错 */}
-      {isText && (
-        <Card className="p-6 text-center">
-          <p className="text-sm text-muted leading-relaxed">
-            该微博仅包含文字内容，无可下载的视频或图片
-          </p>
         </Card>
       )}
     </div>

@@ -1,5 +1,5 @@
 "use client";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Download, Music, Pause, Play } from "lucide-react";
 import { buildVideoProxyUrl } from "@/utils/videoProxy";
@@ -17,6 +17,14 @@ import { Button } from "@/components/ui/button";
  * - inline=true：封面或「播放」按钮在当前页面内嵌 <video> 播放，下载按钮在当前页面触发真实下载。
  *   适合已走代理或直链可直播的源（小红书 / B站），避免新开标签页，体验更好。
  */
+
+/** 多分P项：播放卡片内切换源用（结构与 ParsedVideoItem 子集兼容） */
+export interface PosterPart {
+  title?: string;
+  durationFormat?: string;
+  url: string;
+  cover?: string;
+}
 
 type AccentKey = "blue" | "red" | "orange" | "pink" | "neutral" | "purple" | "dy";
 
@@ -60,12 +68,15 @@ interface VideoPosterCardProps {
   downloadName?: string;
   /** 是否显示下载按钮，默认 true */
   showDownload?: boolean;
-  /** 自定义下载按钮点击：提供后按钮改为按钮型（不直接下载），如滚动定位到下载区 */
-  onDownloadClick?: () => void;
+  /** 自定义下载按钮点击：提供后按钮改为按钮型（不直接下载），如滚动定位到下载区。
+   *  参数为当前分P index（多P时为 partsList 下标，单视频时为 0） */
+  onDownloadClick?: (index: number) => void;
   /** 是否显示「播放视频」按钮（默认 true；false 时封面自带点击 + 下方只剩下载） */
   showPlay?: boolean;
   /** 内嵌播放模式：封面/播放按钮在当前页面内嵌 <video> 播放，下载走代理真实下载（适合已代理的源，如小红书） */
   inline?: boolean;
+  /** 多分P列表（可选）：>1 时播放卡片内显示分P切换条，播放/封面/下载跟随当前分P */
+  parts?: PosterPart[];
 }
 
 export default function VideoPosterCard({
@@ -83,35 +94,66 @@ export default function VideoPosterCard({
   onDownloadClick,
   showPlay = true,
   inline = false,
+  parts,
 }: VideoPosterCardProps) {
   const gradient = ACCENTS[accent];
+  // 多分P：parts 存在且 >1 时启用分P切换，当前分P决定播放/封面/下载源
+  const partsList = Array.isArray(parts) && parts.length > 1 ? parts : null;
+  const [partIndex, setPartIndex] = useState(0);
+  const activePart = partsList ? partsList[partIndex] : null;
+  const currentUrl = activePart?.url || url;
+  const currentCover = activePart?.cover || cover;
   // 防盗链直链走代理，保证可播放、可下载
-  const playUrl = buildVideoProxyUrl(url);
+  const playUrl = buildVideoProxyUrl(currentUrl);
   // 内嵌播放状态管理：
   // - expanded：播放器是否已展开（展开后封面隐藏）
   // - playing：是否实际在播放（由 <video> 的 play/pause 事件同步）
+  // - playError：媒体加载失败（源地址不可用/被 CDN 拒绝），用于展示提示
   const [expanded, setExpanded] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [playError, setPlayError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // 内嵌模式：点击封面/播放按钮 —— 未展开则展开并自动播放，已展开则播放/暂停切换
+  // 展开播放器后显式触发播放：autoPlay 属性在部分浏览器（严格自动播放策略/无头
+  // 环境）下不可靠，这里在视频挂载后 play()——点击按钮带来的用户激活窗口内可
+  // 正常通过；被拦截时静默，用户可再点一次，媒体加载错误由 onError 提示。
+  useEffect(() => {
+    if (inline && expanded && videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    }
+  }, [inline, expanded]);
+
+  // 内嵌模式：点击封面/播放按钮 —— 未展开则展开并自动播放，已展开则播放/暂停切换。
+  // playing 状态一律由 <video> 的 onPlay/onPause 事件同步，不手动置位，
+  // 避免媒体加载失败时按钮状态与真实播放状态错乱。
   const handleInlinePlay = () => {
     if (!expanded) {
       setExpanded(true);
-      setPlaying(true);
+      setPlayError(false);
     } else if (videoRef.current) {
       if (playing) {
         videoRef.current.pause();
       } else {
-        videoRef.current.play();
+        videoRef.current.play().catch(() => {});
       }
+    }
+  };
+
+  // 切换分P：内嵌播放已展开时直接换源续播，未展开时切换封面
+  const handlePartChange = (i: number) => {
+    if (!partsList) return;
+    setPartIndex(i);
+    if (inline && expanded && videoRef.current) {
+      setPlayError(false);
+      videoRef.current.src = buildVideoProxyUrl(partsList[i].url);
+      videoRef.current.play().catch(() => {});
     }
   };
 
   return (
     <div className="space-y-3">
       {/* 封面图 / 内嵌播放器 */}
-      {cover && !expanded && (
+      {currentCover && !expanded && (
         <a
           href={inline ? undefined : playUrl}
           target={inline ? undefined : "_blank"}
@@ -123,7 +165,7 @@ export default function VideoPosterCard({
               tall ? "aspect-[9/16] sm:aspect-video" : "aspect-video"
             }`}>
             <Image
-              src={cover}
+              src={currentCover}
               alt={alt || "视频封面"}
               fill
               className="object-contain"
@@ -148,12 +190,47 @@ export default function VideoPosterCard({
             controls
             autoPlay
             playsInline
-            onPlay={() => setPlaying(true)}
+            onPlay={() => {
+              setPlaying(true);
+              setPlayError(false);
+            }}
             onPause={() => setPlaying(false)}
+            onError={() => {
+              setPlaying(false);
+              setPlayError(true);
+            }}
             className={`w-full ${
               tall ? "aspect-[9/16] sm:aspect-video" : "aspect-video"
             } object-contain`}
           />
+          {playError && (
+            <p className="flex items-center gap-1.5 px-4 py-2 text-xs text-red-400 bg-black/70">
+              视频加载失败：源地址不可用，可尝试点击「下载视频」获取文件。
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 多分P切换条：仅有多P时显示，点击切换播放/封面/下载源 */}
+      {partsList && (
+        <div className="flex flex-wrap gap-1.5">
+          {partsList.map((p, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => handlePartChange(i)}
+              aria-pressed={i === partIndex}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                i === partIndex
+                  ? "bg-glass-3 font-medium text-primary"
+                  : "bg-glass-1 text-muted hover:bg-glass-2"
+              }`}>
+              {p.title || `P${i + 1}`}
+              {p.durationFormat && (
+                <span className="text-xs opacity-70">{p.durationFormat}</span>
+              )}
+            </button>
+          ))}
         </div>
       )}
 
@@ -195,7 +272,7 @@ export default function VideoPosterCard({
               variant="outline"
               size="lg"
               className="flex-1"
-              onClick={onDownloadClick}>
+              onClick={() => onDownloadClick(partIndex)}>
               <Download className="h-5 w-5" />
               {downloadText}
             </Button>
@@ -204,7 +281,7 @@ export default function VideoPosterCard({
             <Button asChild variant="outline" size="lg" className="flex-1">
               <a
                 href={`/api/video-proxy?url=${encodeURIComponent(
-                  url
+                  currentUrl
                 )}&download=1&filename=${encodeURIComponent(downloadName)}`}
                 target="_blank"
                 rel="noopener noreferrer">

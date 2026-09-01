@@ -5,6 +5,7 @@ import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
+import CollapsibleGallery from "./CollapsibleGallery";
 import { downloadAllImages } from "@/utils/downloadImages";
 import { Download, Loader2 } from "lucide-react";
 import PlatformIcon from "@/components/PlatformIcon";
@@ -73,36 +74,36 @@ export default function XhsVideo({ data }: XhsVideoProps) {
             <div className="flex-1 min-w-0">
               {xhsData.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-secondary">作者</span>
+                  <span className="text-[13px] text-secondary">作者</span>
                   {xhsData.authorUrl ? (
                     <a
                       href={xhsData.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`打开 ${xhsData.author} 的小红书主页`}
-                      className="text-sm font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
                       {xhsData.author}
                     </a>
                   ) : (
-                    <span className="text-sm font-medium text-accent truncate">
+                    <span className="text-[13px] font-medium text-accent truncate">
                       {xhsData.author}
                     </span>
                   )}
                 </div>
               )}
               {xhsData.authorId && (
-                <p className="mt-0.5 text-xs text-muted truncate">
+                <p className="mt-0.5 text-[13px] text-muted truncate">
                   小红书号：{xhsData.authorId}
                 </p>
               )}
               {xhsData.sign && (
-                <p className="mt-0.5 flex items-start gap-1 text-xs text-muted">
+                <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
                   <span className="min-w-0 line-clamp-2">{xhsData.sign}</span>
                 </p>
               )}
               {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
                 {authorBadges.map(
                   (badge) =>
                     badge.value != null &&
@@ -162,37 +163,39 @@ export default function XhsVideo({ data }: XhsVideoProps) {
               />
             </a>
           ) : (
-            <div
-              className={`grid gap-2 ${
-                images.length === 2
-                  ? "grid-cols-2"
-                  : images.length === 3
-                  ? "grid-cols-3"
-                  : images.length === 4
-                  ? "grid-cols-2"
-                  : "grid-cols-3"
-              }`}>
-              {images.map((imageUrl, index) => (
-                <a
-                  key={index}
-                  href={imageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
-                    images.length === 4 && index >= 2 ? "col-span-1" : ""
-                  }`}>
-                  <Image
-                    src={imageUrl}
-                    alt={`${xhsData.title || "图片"} ${index + 1}`}
-                    fill
-                    sizes="(max-width: 800px) 50vw, 400px"
-                    className="object-cover transition-transform duration-500 group-hover:scale-105"
-                    unoptimized
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                </a>
-              ))}
-            </div>
+            <CollapsibleGallery>
+              <div
+                className={`grid gap-2 ${
+                  images.length === 2
+                    ? "grid-cols-2"
+                    : images.length === 3
+                    ? "grid-cols-3"
+                    : images.length === 4
+                    ? "grid-cols-2"
+                    : "grid-cols-3"
+                }`}>
+                {images.map((imageUrl, index) => (
+                  <a
+                    key={index}
+                    href={imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
+                      images.length === 4 && index >= 2 ? "col-span-1" : ""
+                    }`}>
+                    <Image
+                      src={imageUrl}
+                      alt={`${xhsData.title || "图片"} ${index + 1}`}
+                      fill
+                      sizes="(max-width: 800px) 50vw, 400px"
+                      className="object-cover transition-transform duration-500 group-hover:scale-105"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </a>
+                ))}
+              </div>
+            </CollapsibleGallery>
           )}
 
           {/* 一键下载全部图片 */}

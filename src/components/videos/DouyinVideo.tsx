@@ -5,7 +5,9 @@ import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
+import CollapsibleGallery from "./CollapsibleGallery";
 import { downloadAllImages } from "@/utils/downloadImages";
+import { sanitizeFilename } from "@/utils/filename";
 import { Download, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,12 +29,11 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
   const images = douyinData.images?.filter(Boolean) || [];
   // 文案：desc 优先（完整描述），缺失时回退 title
   const caption = douyinData.desc || douyinData.title;
-  // 下载文件名：douyin-作者-标题.mp4（走代理强制保存）
-  const safe = (s: string) =>
-    s.replace(/[\\/:*?"<>|\r\n]/g, "_").replace(/\.{2,}/g, "_").trim();
-  const downloadName = `douyin-${safe(douyinData.author || "video")}-${safe(
-    (douyinData.title || "video").slice(0, 30)
-  )}.mp4`;
+  // 下载文件名：douyin-作者-标题.mp4（走代理强制保存，净化 + 限长见 @/utils/filename）
+  const downloadName = `douyin-${sanitizeFilename(
+    douyinData.author || "video",
+    20
+  )}-${sanitizeFilename(douyinData.title || "video", 30)}.mp4`;
 
   // 数字缩写：>1万 → x.x万 / xx万，其余千分位
   const formatCount = (n: number) =>
@@ -79,36 +80,36 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
             <div className="flex-1 min-w-0">
               {douyinData.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-secondary">博主</span>
+                  <span className="text-[13px] text-secondary">博主</span>
                   {douyinData.authorUrl ? (
                     <a
                       href={douyinData.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`打开 ${douyinData.author} 的抖音主页`}
-                      className="text-sm font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
                       {douyinData.author}
                     </a>
                   ) : (
-                    <span className="text-sm font-medium text-accent truncate">
+                    <span className="text-[13px] font-medium text-accent truncate">
                       {douyinData.author}
                     </span>
                   )}
                 </div>
               )}
               {douyinData.uid && (
-                <p className="mt-0.5 text-xs text-muted truncate">
+                <p className="mt-0.5 text-[13px] text-muted truncate">
                   抖音号：{douyinData.uid}
                 </p>
               )}
               {douyinData.sign && (
-                <p className="mt-0.5 flex items-start gap-1 text-xs text-muted">
+                <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
                   <span className="min-w-0 line-clamp-2">{douyinData.sign}</span>
                 </p>
               )}
               {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
                 {authorBadges.map(
                   (badge) =>
                     badge.value != null &&
@@ -167,26 +168,28 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
               />
             </a>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {images.map((imageUrl, index) => (
-                <a
-                  key={index}
-                  href={imageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative aspect-[3/4] rounded-xl overflow-hidden group block bg-black">
-                  <Image
-                    src={imageUrl}
-                    alt={`${douyinData.title || "图片"} ${index + 1}`}
-                    fill
-                    sizes="(max-width: 640px) 50vw, 33vw"
-                    className="object-cover transition-transform duration-500 group-hover:scale-[1.02]"
-                    unoptimized
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                </a>
-              ))}
-            </div>
+            <CollapsibleGallery>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {images.map((imageUrl, index) => (
+                  <a
+                    key={index}
+                    href={imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative aspect-[3/4] rounded-xl overflow-hidden group block bg-black">
+                    <Image
+                      src={imageUrl}
+                      alt={`${douyinData.title || "图片"} ${index + 1}`}
+                      fill
+                      sizes="(max-width: 640px) 50vw, 33vw"
+                      className="object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </a>
+                ))}
+              </div>
+            </CollapsibleGallery>
           )}
 
           {/* 一键下载全部图片 */}

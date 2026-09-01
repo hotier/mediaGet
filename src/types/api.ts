@@ -83,6 +83,12 @@ export interface ParseData {
 
   // —— 平台特有统计（保留，抖音等） ——
   like?: number;
+  /** 转发数（X / 微博等） */
+  retweets?: number;
+  /** 评论数（X / 微博等） */
+  replies?: number;
+  /** 查看量（X 等） */
+  views?: number;
   time?: number | string;
   uid?: string;
   /** 视频 ID（抖音 aweme_id 等） */

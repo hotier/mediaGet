@@ -5,6 +5,7 @@ import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
+import CollapsibleGallery from "./CollapsibleGallery";
 import { Card } from "@/components/ui/card";
 
 interface GenericParsedVideoProps {
@@ -95,24 +96,26 @@ export default function GenericParsedVideo({
               />
             </a>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {images.map((src, i) => (
-                <a
-                  key={`${src}-${i}`}
-                  href={src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative aspect-square rounded-lg overflow-hidden border border-border-subtle bg-black group">
-                  <Image
-                    src={src}
-                    alt=""
-                    fill
-                    className="object-contain p-1 transition-transform duration-300 group-hover:scale-105"
-                    unoptimized
-                  />
-                </a>
-              ))}
-            </div>
+            <CollapsibleGallery>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {images.map((src, i) => (
+                  <a
+                    key={`${src}-${i}`}
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative aspect-square rounded-lg overflow-hidden border border-border-subtle bg-black group">
+                    <Image
+                      src={src}
+                      alt=""
+                      fill
+                      className="object-contain p-1 transition-transform duration-300 group-hover:scale-105"
+                      unoptimized
+                    />
+                  </a>
+                ))}
+              </div>
+            </CollapsibleGallery>
           )}
         </div>
       )}

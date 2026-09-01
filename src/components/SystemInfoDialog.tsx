@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import Bowser from "bowser";
 
 interface InfoItem {
   label: string;
@@ -10,135 +11,93 @@ interface InfoItem {
 
 /* ---------------- 客户端设备信息检测 ---------------- */
 
-function detectDeviceType(ua: string): string {
-  if (/iPad|Tablet/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) {
-    return "平板";
-  }
-  if (/Mobi|Android|iPhone|iPod/i.test(ua)) return "手机";
-  return "桌面端";
-}
-
-function detectOS(ua: string): string {
-  const p = ua.toLowerCase();
-  if (p.includes("windows")) {
-    if (p.includes("win64") || p.includes("wow64") || p.includes("x64")) {
-      return "Windows (X64)";
-    }
-    if (p.includes("arm64")) return "Windows (ARM64)";
-    if (p.includes("win32") || p.includes("x86")) return "Windows (X86)";
-    return "Windows";
-  }
-  if (p.includes("mac os") || p.includes("macintosh")) return "macOS";
-  if (p.includes("android")) return "Android";
-  if (p.includes("iphone") || p.includes("ipad") || p.includes("ipod")) {
-    return "iOS";
-  }
-  if (p.includes("linux")) return "Linux";
-  return "未知";
-}
-
 interface UABrand {
   brand: string;
   version: string;
 }
 
-type HighEntropyValues = {
-  uaFullVersion?: string;
-  fullVersionList?: UABrand[];
-};
-
-interface UAData {
-  brands?: UABrand[];
-  getHighEntropyValues?: (hints: string[]) => Promise<HighEntropyValues>;
+/** User-Agent Client Hints 的高熵字段（navigator.userAgentData 的部分结构） */
+interface UAHints {
+  getHighEntropyValues?: (
+    hints: string[],
+  ) => Promise<{ uaFullVersion?: string; fullVersionList?: UABrand[] }>;
 }
 
-function detectBrowser(ua: string, uaData?: UAData): string {
-  const brands = uaData?.brands ?? [];
-  const has = (kw: string) =>
-    brands.some((b) => b.brand.toLowerCase().includes(kw));
-
-  // 品牌用 Client Hints 判断（准确）；版本号从 UA 对应段取完整版号
-  if (has("edge")) {
-    const v =
-      ua.match(/edg\/([\d.]+)/i)?.[1] ?? ua.match(/chrome\/([\d.]+)/i)?.[1] ?? "";
-    return v ? `Edge ${v}` : "Edge";
-  }
-  if (has("opera")) {
-    const v = ua.match(/opr\/([\d.]+)/i)?.[1] ?? "";
-    return v ? `Opera ${v}` : "Opera";
-  }
-  if (has("chrome") || has("chromium")) {
-    const v = ua.match(/chrome\/([\d.]+)/i)?.[1] ?? "";
-    return v ? `Chrome ${v}` : "Chrome";
-  }
-
-  // 非 Chromium：UA 字符串解析（Firefox / Safari 等）
-  const p = ua.toLowerCase();
-  const ver = (re: RegExp) => ua.match(re)?.[1] ?? "";
-  if (p.includes("edg/")) return `Edge ${ver(/edg\/([\d.]+)/i)}`.trim();
-  if (p.includes("opr/")) return `Opera ${ver(/opr\/([\d.]+)/i)}`.trim();
-  if (p.includes("opera")) return `Opera ${ver(/opera\/([\d.]+)/i)}`.trim();
-  if (p.includes("firefox")) return `Firefox ${ver(/firefox\/([\d.]+)/i)}`.trim();
-  if (p.includes("chrome")) return `Chrome ${ver(/chrome\/([\d.]+)/i)}`.trim();
-  if (p.includes("safari")) return `Safari ${ver(/version\/([\d.]+)/i)}`.trim();
-  return "未知";
+/** 获取浏览器的标准名称（bowser 内部优先使用 Client Hints 的 brands） */
+function getBrowserName(): string {
+  const ua = navigator.userAgent;
+  const uaData = (
+    navigator as Navigator & { userAgentData?: Bowser.ClientHints }
+  ).userAgentData;
+  return Bowser.getParser(ua, uaData).getBrowser().name ?? "未知";
 }
 
 /**
- * 异步获取浏览器品牌 + 完整版号。
- * UA 字符串可能不含真实完整版号（如 Chrome/152.0.0.0 占位、缺 Edg/ 段），
- * 需通过 High-Entropy Client Hints（getHighEntropyValues）获取完整版号（如 152.0.4191.53）。
+ * 异步获取 Chromium 系浏览器的真实完整版号（如 152.0.4191.53）。
+ * UA 字符串可能只带占位版号（Chrome/152.0.0.0），需通过 High-Entropy Client Hints 获取。
  */
-async function detectBrowserFull(): Promise<string> {
-  const ua = navigator.userAgent;
-  const uaData = (navigator as Navigator & { userAgentData?: UAData })
-    .userAgentData;
-  const brands = uaData?.brands ?? [];
-  const has = (kw: string) =>
-    brands.some((b) => b.brand.toLowerCase().includes(kw));
-
-  let brand: "Edge" | "Opera" | "Chrome" | null = null;
-  if (has("edge")) brand = "Edge";
-  else if (has("opera")) brand = "Opera";
-  else if (has("chrome") || has("chromium")) brand = "Chrome";
-
-  if (brand && uaData?.getHighEntropyValues) {
-    try {
-      const h = await uaData.getHighEntropyValues([
-        "uaFullVersion",
-        "fullVersionList",
-      ]);
-      const list = h.fullVersionList ?? [];
-      const version =
-        (brand === "Edge" &&
-          list.find((b) => b.brand.toLowerCase().includes("edge"))?.version) ||
-        (brand === "Opera" &&
-          list.find((b) => /opera|opr/i.test(b.brand))?.version) ||
-        (brand === "Chrome" &&
-          list.find((b) => /google chrome|chromium/i.test(b.brand))?.version) ||
-        h.uaFullVersion ||
-        "";
-      if (version) return `${brand} ${version}`;
-    } catch {
-      // 权限被拒或非安全上下文，回退到同步解析
-    }
+async function getFullBrowserVersion(brandName: string): Promise<string | null> {
+  const uaData = (
+    navigator as Navigator & { userAgentData?: UAHints }
+  ).userAgentData;
+  if (!uaData?.getHighEntropyValues) return null;
+  try {
+    const h = await uaData.getHighEntropyValues([
+      "uaFullVersion",
+      "fullVersionList",
+    ]);
+    const list = h.fullVersionList ?? [];
+    const b = brandName.toLowerCase();
+    const version =
+      (b.includes("edge") &&
+        list.find((x) => x.brand.toLowerCase().includes("edge"))?.version) ||
+      (b.includes("opera") &&
+        list.find((x) => /opera|opr/i.test(x.brand))?.version) ||
+      (b.includes("chrome") &&
+        list.find((x) => /google chrome|chromium/i.test(x.brand))?.version) ||
+      h.uaFullVersion ||
+      null;
+    return version;
+  } catch {
+    // 权限被拒或非安全上下文，回退到同步解析结果
+    return null;
   }
-
-  return detectBrowser(ua, uaData);
 }
 
 function collectDeviceInfo(): InfoItem[] {
   const ua = navigator.userAgent;
   const uaData = (
-    navigator as Navigator & { userAgentData?: UAData }
+    navigator as Navigator & { userAgentData?: Bowser.ClientHints }
   ).userAgentData;
-  const isOnline = navigator.onLine;
+  const parser = Bowser.getParser(ua, uaData);
+
+  const platformType = parser.getPlatform().type; // "desktop" | "mobile" | "tablet"
+  // iPadOS 13+ 的 Safari 伪装成 Macintosh 桌面 UA，需用触摸点兜底识别
+  const isIPad =
+    platformType === "desktop" &&
+    /macintosh|mac os/i.test(ua) &&
+    (navigator.maxTouchPoints ?? 0) > 1;
+
+  let osName = isIPad ? "iPadOS" : parser.getOS().name ?? "未知";
+  // Windows 附加架构信息（bowser 不输出架构，从 UA 提取）
+  if (osName === "Windows") {
+    const p = ua.toLowerCase();
+    if (p.includes("arm64")) osName = "Windows (ARM64)";
+    else if (p.includes("win64") || p.includes("wow64") || p.includes("x64")) {
+      osName = "Windows (X64)";
+    } else if (p.includes("win32") || p.includes("x86")) {
+      osName = "Windows (X86)";
+    }
+  }
+
+  const browser = parser.getBrowser();
+  const browserValue = browser.version
+    ? `${browser.name ?? "未知"} ${browser.version}`
+    : browser.name ?? "未知";
 
   return [
-    { label: "设备类型", value: detectDeviceType(ua) },
-    { label: "操作系统", value: detectOS(ua) },
-    { label: "浏览器", value: detectBrowser(ua, uaData) },
-    { label: "网络状态", value: isOnline ? "在线" : "离线" },
+    { label: "操作系统", value: osName },
+    { label: "浏览器", value: browserValue },
   ];
 }
 
@@ -353,7 +312,7 @@ async function fetchText(
   }
 }
 
-/** IP 解析器注册表：中文接口在前，英文居中，纯 IP 兜底在后 */
+/** IP 解析器注册表：全为中文归属地接口，竞速取最快结果 */
 const IP_PARSERS: IpParser[] = [
   {
     name: "ip9.com.cn",
@@ -438,88 +397,11 @@ const IP_PARSERS: IpParser[] = [
       };
     },
   },
-  {
-    name: "ip.sb",
-    zh: true,
-    url: "https://api.ip.sb/geoip?lang=zh-CN",
-    parse: (text) => {
-      const d = JSON.parse(text) as {
-        ip?: unknown;
-        country?: string;
-        country_code?: string;
-        region?: string;
-        city?: string;
-        isp?: string;
-      };
-      if (typeof d.ip !== "string" || !d.ip) throw new Error("missing ip");
-      return {
-        ip: d.ip,
-        isp: normalizeIsp(d.isp),
-        location: formatLocation(d.country, d.country_code, d.region, d.city),
-      };
-    },
-  },
-  {
-    name: "ipinfo.io",
-    url: "https://ipinfo.io/json",
-    parse: (text) => {
-      const d = JSON.parse(text) as {
-        ip?: unknown;
-        country?: string;
-        region?: string;
-        city?: string;
-      };
-      if (typeof d.ip !== "string" || !d.ip) throw new Error("missing ip");
-      const name = d.country ? COUNTRY_NAMES[d.country.toUpperCase()] : undefined;
-      return {
-        ip: d.ip,
-        location: formatLocation(name, d.country, d.region, d.city),
-      };
-    },
-  },
-  {
-    name: "ipapi.co",
-    url: "https://ipapi.co/json/",
-    parse: (text) => {
-      const d = JSON.parse(text) as {
-        ip?: unknown;
-        country_code?: string;
-        country_name?: string;
-        region?: string;
-        city?: string;
-      };
-      if (typeof d.ip !== "string" || !d.ip) throw new Error("missing ip");
-      const code = d.country_code?.toUpperCase();
-      const name = code ? COUNTRY_NAMES[code] ?? d.country_name : d.country_name;
-      return {
-        ip: d.ip,
-        location: formatLocation(name, code, d.region, d.city),
-      };
-    },
-  },
-  {
-    name: "ipify",
-    url: "https://api.ipify.org?format=json",
-    parse: (text) => {
-      const d = JSON.parse(text) as { ip?: unknown };
-      if (typeof d.ip !== "string" || !d.ip) throw new Error("missing ip");
-      return { ip: d.ip };
-    },
-  },
-  {
-    name: "jsonip",
-    url: "https://jsonip.com",
-    parse: (text) => {
-      const d = JSON.parse(text) as { ip?: unknown };
-      if (typeof d.ip !== "string" || !d.ip) throw new Error("missing ip");
-      return { ip: d.ip };
-    },
-  },
 ];
 
 async function fetchIpInfo(): Promise<IpInfo | null> {
-  // 竞速返回：拿到中文归属地结果立即返回，不再等慢接口；
-  // 首个普通结果给 1 秒窗口等更好的；全部失败返回 null
+  // 竞速返回：接口全为中文归属地，任一成功立即返回，不再等慢接口；
+  // 若无归属地结果则等 1 秒窗口取最优；全部失败返回 null
   return new Promise<IpInfo | null>((resolve) => {
     const candidates: { info: IpInfo; parserIndex: number }[] = [];
     let remaining = IP_PARSERS.length;
@@ -579,41 +461,84 @@ async function fetchIpInfo(): Promise<IpInfo | null> {
 
 /* ---------------- 组件 ---------------- */
 
+/**
+ * 自动探测（页面进入/组件重挂载、弹窗未打开）连续失败的次数上限。
+ * 达到上限后自动探测停手，避免外网接口不可达时反复请求刷日志；
+ * 用户主动点击"本机信息"打开弹窗可绕过上限重新触发探测。
+ * 模块级变量跨组件实例共享：SPA 切页重挂载后上限状态仍生效。
+ */
+const MAX_AUTO_PROBE_FAILURES = 3;
+let autoProbeFailures = 0;
+
+/** per-IP 限流状况（/api/rate-limit，60 秒滑动窗口） */
+interface RateLimitStatus {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsInMs: number;
+}
+
 export default function SystemInfoDialog() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<InfoItem[]>([]);
   const [ipInfo, setIpInfo] = useState<IpInfo | null>(null);
   const [ipLoading, setIpLoading] = useState(false);
   const [ipFetchedAt, setIpFetchedAt] = useState(0);
+  const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
 
   // 客户端挂载后收集设备信息，避免服务端渲染时访问 navigator 导致水合不一致
   useEffect(() => {
     setItems(collectDeviceInfo());
-    // 异步获取浏览器完整版号（High-Entropy Client Hints 才包含真实完整版号）
-    detectBrowserFull().then((browser) => {
+    // 异步获取 Chromium 系浏览器的真实完整版号（High-Entropy Client Hints 才包含）
+    getFullBrowserVersion(getBrowserName()).then((version) => {
+      if (!version) return;
       setItems((prev) =>
         prev.map((it) =>
-          it.label === "浏览器" ? { ...it, value: browser } : it,
+          it.label === "浏览器"
+            ? { ...it, value: it.value.replace(/\s[\d.]+$/, ` ${version}`) }
+            : it,
         ),
       );
     });
   }, []);
 
-  // 弹窗打开时异步获取公网 IP 与归属地（30 秒内缓存复用，避免频繁开关反复请求）
+  // 网页进入即异步预加载公网 IP 与归属地（成功缓存 30 秒复用）；
+  // 弹窗打开时若缓存已过期则刷新，否则直接展示已加载结果，无需等待。
+  // 守卫条件基于 ipFetchedAt 而非 ipInfo：接口全部失败返回 null 时，
+  // setIpInfo(null) 也会触发依赖变化，若守卫只看 ipInfo 就会无限重试
+  // （每次重试约 4s 超时，即日志中 /api/ip 无限刷新的根因）。
+  // 自动探测：成功缓存 30 秒、失败冷却 10 秒、连续失败达到
+  // MAX_AUTO_PROBE_FAILURES 次后停手，只有再次点击"本机信息"打开弹窗
+  // （手动触发，绕过失败上限与冷却）才会重新探测。
   useEffect(() => {
-    if (!open) return;
-    if (ipInfo && Date.now() - ipFetchedAt < 30_000) return;
+    const isManual = open;
+    // 自动探测连续失败达上限 → 停手，等待用户手动触发
+    if (!isManual && autoProbeFailures >= MAX_AUTO_PROBE_FAILURES) return;
+    // 成功缓存 30 秒内直接复用，不做重复请求
+    if (ipInfo && ipFetchedAt && Date.now() - ipFetchedAt < 30_000) return;
+    // 自动探测失败后 10 秒冷却；手动（打开弹窗）不受冷却限制，立即重试
+    if (!isManual && ipFetchedAt && Date.now() - ipFetchedAt < 10_000) return;
+    const wasAuto = !isManual;
     let cancelled = false;
     setIpLoading(true);
     fetchIpInfo()
       .then((info) => {
         if (cancelled) return;
+        if (info) {
+          // 成功即视为网络恢复，重置失败计数
+          autoProbeFailures = 0;
+        } else if (wasAuto) {
+          // 仅自动探测失败计入上限；用户手动触发失败不计入
+          autoProbeFailures += 1;
+        }
         setIpInfo(info);
         setIpFetchedAt(Date.now());
         setIpLoading(false);
       })
       .catch(() => {
+        // fetchIpInfo 正常情况下不 reject（全失败返回 null），此处为防御
         if (cancelled) return;
+        if (wasAuto) autoProbeFailures += 1;
         setIpInfo(null);
         setIpFetchedAt(Date.now());
         setIpLoading(false);
@@ -622,6 +547,41 @@ export default function SystemInfoDialog() {
       cancelled = true;
     };
   }, [open, ipInfo, ipFetchedAt]);
+
+  // 弹窗打开时查询 per-IP 限流状况（60 次/分钟滑动窗口，只读不消耗配额）。
+  // 打开期间每 5 秒轮询刷新一次，让解析请求产生的计数变化能即时反映到界面；
+  // 最多轮询 5 次后自动停止，防止用户长时间开着弹窗无限轮询
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    let pollCount = 0;
+    const MAX_POLLS = 5;
+    const query = () => {
+      pollCount++;
+      fetch("/api/rate-limit")
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return;
+          if (d?.code === 0 && d?.data) setRateLimit(d.data);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setRateLimit(null);
+        });
+    };
+    query();
+    const timer = setInterval(() => {
+      if (pollCount >= MAX_POLLS) {
+        clearInterval(timer);
+        return;
+      }
+      query();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [open]);
 
   // ESC 关闭
   useEffect(() => {
@@ -704,6 +664,20 @@ export default function SystemInfoDialog() {
                   </dd>
                 </div>
               ))}
+              {rateLimit && (
+                <div className="flex min-w-0 items-baseline justify-between gap-3">
+                  <dt className="shrink-0 text-[13px] text-muted">限流配额</dt>
+                  <dd
+                    className="truncate text-[13px] text-primary"
+                    title={`本分钟已用 ${rateLimit.used}/${rateLimit.limit} 次${
+                      rateLimit.resetsInMs > 0
+                        ? `，最早记录约 ${Math.ceil(rateLimit.resetsInMs / 1000)} 秒后移出窗口`
+                        : ""
+                    }`}>
+                    {rateLimit.remaining}/{rateLimit.limit}
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
         </div>
