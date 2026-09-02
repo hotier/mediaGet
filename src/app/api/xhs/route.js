@@ -7,6 +7,81 @@ export const runtime = "nodejs";
 const XHS_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0";
 
+// 可选：浏览器登录小红书后复制的 Cookie，可显著降低数据中心/海外出口被风控概率
+const XHS_COOKIE = process.env.XHS_COOKIE || "";
+
+// —— 简易 Cookie 池 ——
+// 小红书对无 Cookie 的请求（尤其数据中心/海外 IP）会间歇返回安全验证页
+// （无 __INITIAL_STATE__），带齐 a1/webId 等匿名 Cookie 后通常可放行。
+// Node fetch 不自动保存 Cookie，这里累积各响应 set-cookie 供后续请求使用。
+const xhsCookiePool = {};
+
+function absorbXhsCookies(response) {
+  try {
+    const list =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [];
+    for (const raw of list) {
+      const pair = String(raw).split(";")[0].trim();
+      const name = pair.split("=")[0]?.trim();
+      if (!name) continue;
+      xhsCookiePool[name] = pair;
+    }
+  } catch {
+    // 忽略吸收失败，不影响主流程
+  }
+}
+
+/** 合并多段 Cookie：环境变量 XHS_COOKIE 优先，其次 Cookie 池 */
+function buildXhsCookieString(extra) {
+  const sources = [extra, XHS_COOKIE];
+  for (const name of Object.keys(xhsCookiePool)) {
+    sources.push(xhsCookiePool[name]);
+  }
+  const seen = new Set();
+  const parts = [];
+  for (const src of sources) {
+    if (!src) continue;
+    for (const seg of String(src).split(";")) {
+      const kv = seg.trim();
+      if (!kv) continue;
+      const name = kv.split("=")[0];
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        parts.push(kv);
+      }
+    }
+  }
+  return parts.join("; ");
+}
+
+/** 完整浏览器请求头（小红书会校验请求特征，缺头易被识别为爬虫） */
+function xhsHeaders({ referer, cookie, acceptJson } = {}) {
+  const headers = {
+    "User-Agent": XHS_USER_AGENT,
+    Accept: acceptJson
+      ? "application/json, text/plain, */*"
+      : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    "sec-ch-ua":
+      '"Microsoft Edge";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+  };
+  if (referer) headers.Referer = referer;
+  const cookieStr = buildXhsCookieString(cookie);
+  if (cookieStr) headers.Cookie = cookieStr;
+  return headers;
+}
+
 function output(code, msg, data = []) {
   return {
     code,
@@ -31,48 +106,62 @@ function normalizeXhsUrl(url) {
 }
 
 /**
- * 短链与笔记页：手动跟随重定向，兼容 xhslink.com 的 o/ 短链
+ * 短链与笔记页：手动跟随重定向，兼容 xhslink.com 的 o/ 短链。
+ * 每次响应吸收 set-cookie，后续请求自动携带（无 Cookie 时小红书易弹安全验证）。
+ * 首次链路失败/被风控时，用已吸收的 Cookie 自动重试一次。
  */
-async function fetchXhsNoteHtml(url) {
+async function fetchXhsNoteHtml(url, attempt = 1) {
   const target = normalizeXhsUrl(url);
 
-  // 第一步：请求短链，手动处理重定向
-  let response = await fetch(target, {
-    headers: {
-      "User-Agent": XHS_USER_AGENT,
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    },
-    redirect: "manual",
-  });
-
-  // 手动跟随重定向（最多跟 5 次）
-  let redirectCount = 0;
-  const maxRedirects = 5;
-  while (
-    redirectCount < maxRedirects &&
-    [301, 302, 303, 307, 308].includes(response.status)
-  ) {
-    const location = response.headers.get("location");
-    if (!location) break;
-    const nextUrl = new URL(location, response.url).toString();
-    redirectCount++;
-    response = await fetch(nextUrl, {
-      headers: {
-        "User-Agent": XHS_USER_AGENT,
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        // 带上 Referer 避免被拦截
-        Referer: response.url,
-      },
+  const doFetch = (u, referer) =>
+    fetch(u, {
+      headers: xhsHeaders(referer ? { referer } : {}),
       redirect: "manual",
+      signal: AbortSignal.timeout(20000),
     });
-  }
 
-  const html = await response.text();
-  return { html, finalUrl: response.url };
+  try {
+    // 第一步：请求短链/笔记页，手动处理重定向
+    let response = await doFetch(target, "");
+    absorbXhsCookies(response);
+
+    // 手动跟随重定向（最多跟 5 次），每步带上已吸收的 Cookie 与来源 Referer
+    let redirectCount = 0;
+    const maxRedirects = 5;
+    while (
+      redirectCount < maxRedirects &&
+      [301, 302, 303, 307, 308].includes(response.status)
+    ) {
+      const location = response.headers.get("location");
+      if (!location) break;
+      const nextUrl = new URL(location, response.url).toString();
+      redirectCount++;
+      response = await doFetch(nextUrl, response.url);
+      absorbXhsCookies(response);
+    }
+
+    const html = await response.text();
+    const finalUrl = response.url;
+
+    // 已落到小红书域但缺页面数据：多半是首次无 Cookie 被风控，
+    // 用已吸收的 Cookie 整条重试一次（二次请求通常能拿到正常笔记页）
+    if (
+      attempt === 1 &&
+      !html.includes("__INITIAL_STATE__") &&
+      /xiaohongshu\.com|xhslink\.(com|cn)/.test(finalUrl)
+    ) {
+      console.log("[xhs] retry with absorbed cookies, finalUrl:", finalUrl);
+      return fetchXhsNoteHtml(url, 2);
+    }
+
+    return { html, finalUrl };
+  } catch (error) {
+    if (attempt === 1) {
+      console.log("[xhs] fetch error, retry once:", error.message);
+      return fetchXhsNoteHtml(url, 2);
+    }
+    throw error;
+  }
 }
 
 // 安全地获取嵌套属性
@@ -204,7 +293,11 @@ async function pickStableVideoUrl(entry) {
       /* try next */
     }
   }
-  return null;
+  // HEAD 全部失败不一定是链接不可用（CDN 可能拒绝 HEAD / 节点抽风），
+  // 退回第一个候选让下游 video-proxy 用 GET 尝试，避免把可用的视频
+  // 误判成“该内容不包含视频或图片”。
+  console.log("[xhs] all video HEAD failed, fallback:", candidates[0]);
+  return candidates[0];
 }
 
 async function xhs(url) {
@@ -241,6 +334,16 @@ async function xhs(url) {
 
     let jsonRaw = extractInitialStateJson(html);
     if (!jsonRaw) {
+      // 安全验证页/风控拦截的典型特征（页面不含 __INITIAL_STATE__）
+      if (
+        /安全验证|请完成验证|__AC_NONCE__|geetest|verify|captcha/i.test(html)
+      ) {
+        console.log("[xhs] blocked by safety check, finalUrl:", finalUrl);
+        return output(
+          400,
+          "小红书触发了安全验证，请稍后重试（或联系站长配置 XHS_COOKIE）"
+        );
+      }
       // 尝试打印 HTML 片段帮助调试
       console.log("[xhs] HTML preview:", html.substring(0, 500));
       return output(400, "未找到页面数据，小红书可能更新了页面结构");

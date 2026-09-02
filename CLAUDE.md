@@ -58,6 +58,7 @@ Configure in `.env` for full functionality:
 
 - `DOUYIN_COOKIE`, `DOUYIN_USER_AGENT` — Douyin parsing
 - `BILIBILI_COOKIE` — Bilibili parsing
+- `XHS_COOKIE` — Xiaohongshu parsing（数据中心/海外出口被风控时强烈建议配置）
 - `WEIBO_COOKIE` — Weibo parsing
 - `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` — Turso (libsql) database for parse analytics; when unset, analytics is silently disabled
 - `STATS_API_KEY` — Bearer key protecting `GET /api/stats`; when unset, the stats endpoint returns 403
