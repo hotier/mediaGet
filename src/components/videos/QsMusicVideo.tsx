@@ -5,6 +5,7 @@ import { ChevronDown, Download, ExternalLink } from "lucide-react";
 import { ApiResponse, ParseData } from "@/types/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
 
 interface QsMusicVideoProps {
   data: ApiResponse;
@@ -34,9 +35,11 @@ export default function QsMusicVideo({ data }: QsMusicVideoProps) {
             />
           )}
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-primary line-clamp-2">
-              {musicData.name}
-            </h2>
+            <TruncatedText
+              as="h2"
+              text={musicData.name || ""}
+              className="text-lg font-semibold text-primary line-clamp-2"
+            />
             {musicData.core && (
               <p className="text-sm text-secondary mt-1">{musicData.core}</p>
             )}

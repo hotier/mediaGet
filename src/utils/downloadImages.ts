@@ -70,16 +70,20 @@ export async function downloadImage(src: string, filename: string): Promise<bool
 }
 
 /**
- * 批量下载全部图片（逐个触发，带间隔避免浏览器批量拦截）。
+ * 批量下载图片（逐个触发，带间隔避免浏览器批量拦截）。
+ * @param indices 可选：每张图对应的「图集原序号」（1-based，多选下载场景传入，
+ *                保证文件名保留用户看到的图序）；缺省按下载顺序 1..N 命名。
  * @returns 真实下载成功的张数（回退打开的算失败）
  */
 export async function downloadAllImages(
   images: string[],
-  baseName: string
+  baseName: string,
+  indices?: number[]
 ): Promise<number> {
   let ok = 0;
   for (let i = 0; i < images.length; i++) {
-    const okOne = await downloadImage(images[i], `${baseName}-${i + 1}`);
+    const n = indices?.[i] ?? i + 1;
+    const okOne = await downloadImage(images[i], `${baseName}-${n}`);
     if (okOne) ok++;
     // 间隔避免浏览器把连续下载当作批量/恶意行为
     await new Promise((r) => setTimeout(r, 400));

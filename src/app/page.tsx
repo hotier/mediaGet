@@ -20,18 +20,65 @@ import { cn } from "@/lib/utils";
 // 平台名称单一数据源：从配置读取，避免与代码脱节（之前 README/SEO 只列了 7 个，实际 24 个）
 const PLATFORM_NAMES = Object.values(VIDEO_PLATFORMS).map((p) => p.name);
 
+// 首页会话：切页返回 / 刷新后恢复解析结果与错误提示（同一标签页会话内保留）
+const HOME_SESSION_KEY = "mediaGet-home-session";
+
+// 入场动画是否已播放：整页加载时为 false（首次进入/刷新播放 reveal 动画）；
+// SPA 切页返回时模块不会重新执行、introPlayed 仍为 true，据此跳过动画避免画面抖动。
+// 服务端渲染不执行组件 effect，恒为 false，保证首屏 HTML 一致输出动画版。
+let introPlayed = false;
+
 export default function Home() {
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [pickedPlatform, setPickedPlatform] = useState<VideoPlatformKey | "auto" | null>(null);
   const [pickNonce, setPickNonce] = useState(0);
   const [activePlatform, setActivePlatform] = useState<VideoPlatformKey | "auto">("auto");
 
+  // 入场动画仅整页加载（首进/刷新）播放一次：
+  // SPA 切页返回时模块级 introPlayed 仍为 true → 跳过动画、直接稳定显示
+  const [enterAnimated] = useState(() => !introPlayed);
+  const [mounted, setMounted] = useState(
+    () => typeof window !== "undefined" && introPlayed
+  );
+
   useEffect(() => {
+    introPlayed = true;
     setMounted(true);
   }, []);
+
+  // 挂载时恢复上次会话的结果 / 错误 / 平台高亮
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(HOME_SESSION_KEY);
+      if (!raw) return;
+      const saved: {
+        result?: ApiResponse | null;
+        error?: string;
+        activePlatform?: VideoPlatformKey | "auto";
+      } = JSON.parse(raw);
+      if (saved.result && (saved.result.code === 1 || saved.result.code === 200)) {
+        setResult(saved.result);
+      }
+      if (typeof saved.error === "string") setError(saved.error);
+      if (saved.activePlatform) setActivePlatform(saved.activePlatform);
+    } catch {
+      // 损坏的会话数据：忽略
+    }
+  }, []);
+
+  // 结果 / 错误 / 平台变化时同步会话
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        HOME_SESSION_KEY,
+        JSON.stringify({ result, error, activePlatform })
+      );
+    } catch {
+      // 配额满或不可写：静默失败
+    }
+  }, [result, error, activePlatform]);
 
   const handleParseResult = (
     data: ApiResponse | null,
@@ -54,7 +101,7 @@ export default function Home() {
       <div className="relative" style={{ zIndex: 1 }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
           {/* Hero Section */}
-          <header className="text-center mb-8 pt-2 sm:pt-6 reveal">
+          <header className={cn("text-center mb-8 pt-2 sm:pt-6", enterAnimated && "reveal")}>
             <h1 className="mx-auto max-w-3xl text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight leading-[1.15]">
               粘贴链接，
               <span className="gradient-text">秒出无水印视频</span>
@@ -66,7 +113,7 @@ export default function Home() {
 
           {/* Body: Form/Results */}
           <div className="max-w-3xl mx-auto">
-            <div className={`reveal reveal-delay-2 ${mounted ? "opacity-100" : "opacity-0"}`}>
+            <div className={cn(mounted ? "opacity-100" : "opacity-0", enterAnimated && "reveal reveal-delay-2")}>
               <VideoParserForm
                 onResult={handleParseResult}
                 setLoading={setLoading}
@@ -149,7 +196,7 @@ export default function Home() {
 
             {/* Error State */}
             {error && (
-              <div className="reveal mt-6">
+              <div className={cn("mt-6", enterAnimated && "reveal")}>
                 <Card className="border-l-4 border-l-error p-5">
                   <div className="flex items-start gap-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10">
@@ -177,7 +224,7 @@ export default function Home() {
 
             {/* Results Section */}
             {result && (result.code === 1 || result.code === 200) && (
-              <div className="reveal mt-6">
+              <div className={cn("mt-6", enterAnimated && "reveal")}>
                 <Card className="overflow-hidden">
                   <CardHeader className="flex flex-row items-center justify-between border-b border-border-subtle bg-glass-2">
                     <Badge variant="success">

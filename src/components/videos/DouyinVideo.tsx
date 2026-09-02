@@ -1,16 +1,18 @@
 "use client";
-import React, { useState } from "react";
 import Image from "next/image";
 import { ApiResponse, ParseData } from "@/types/api";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
-import { downloadAllImages } from "@/utils/downloadImages";
 import { sanitizeFilename } from "@/utils/filename";
-import { Download, Loader2 } from "lucide-react";
+import {
+  GalleryDownloadBar,
+  SelectableImageLink,
+  useGallerySelection,
+} from "./GalleryMultiSelect";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
 import PlatformIcon from "@/components/PlatformIcon";
 
 interface DouyinVideoProps {
@@ -18,7 +20,10 @@ interface DouyinVideoProps {
 }
 
 export default function DouyinVideo({ data }: DouyinVideoProps) {
-  const [downloading, setDownloading] = useState(false);
+  // 图集多选状态（图文作品 N 张图；张数随解析结果变化时自动清理越界勾选）
+  const gallerySel = useGallerySelection(
+    (data.data as ParseData | undefined)?.images?.filter(Boolean).length ?? 0
+  );
 
   if (!data.data) {
     return null;
@@ -48,16 +53,6 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
     { label: "获赞", value: douyinData.totalFavorited },
   ];
 
-  const handleDownloadAll = async () => {
-    if (downloading || images.length === 0) return;
-    setDownloading(true);
-    try {
-      await downloadAllImages(images, `douyin-${douyinData.author || "图集"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   return (
     <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
       {/* 博主信息卡：头像 + 昵称 + 抖音号 + 粉丝/关注/获赞（主页公开信息，缺失自动隐藏） */}
@@ -82,30 +77,36 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">博主</span>
                   {douyinData.authorUrl ? (
-                    <a
+                    <TruncatedText
+                      as="a"
+                      text={douyinData.author}
                       href={douyinData.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${douyinData.author} 的抖音主页`}
-                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {douyinData.author}
-                    </a>
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors"
+                    />
                   ) : (
-                    <span className="text-[13px] font-medium text-accent truncate">
-                      {douyinData.author}
-                    </span>
+                    <TruncatedText
+                      text={douyinData.author}
+                      className="text-[13px] font-medium text-accent truncate"
+                    />
                   )}
                 </div>
               )}
               {douyinData.uid && (
-                <p className="mt-0.5 text-[13px] text-muted truncate">
-                  抖音号：{douyinData.uid}
-                </p>
+                <TruncatedText
+                  as="p"
+                  text={`抖音号：${douyinData.uid}`}
+                  className="mt-0.5 text-[13px] text-muted truncate"
+                />
               )}
               {douyinData.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{douyinData.sign}</span>
+                  <TruncatedText
+                    text={douyinData.sign}
+                    className="min-w-0 line-clamp-2"
+                  />
                 </p>
               )}
               {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
@@ -171,11 +172,13 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
             <CollapsibleGallery>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {images.map((imageUrl, index) => (
-                  <a
+                  <SelectableImageLink
                     key={index}
                     href={imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    accent="#fe2c55"
+                    selecting={gallerySel.selecting}
+                    selected={gallerySel.isSelected(index)}
+                    onToggle={() => gallerySel.toggle(index)}
                     className="relative aspect-[3/4] rounded-xl overflow-hidden group block bg-black">
                     <Image
                       src={imageUrl}
@@ -186,31 +189,19 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
                       unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </a>
+                  </SelectableImageLink>
                 ))}
               </div>
             </CollapsibleGallery>
           )}
 
-          {/* 一键下载全部图片 */}
-          <Button
-            type="button"
-            onClick={handleDownloadAll}
-            disabled={downloading}
-            size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#fe2c55] to-[#ff6b8a] hover:opacity-90">
-            {downloading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在下载...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                一键下载全部图片（{images.length} 张）
-              </>
-            )}
-          </Button>
+          {/* 图集下载：选图多选下载 / 一键下载全部（多选文件名保留原图序） */}
+          <GalleryDownloadBar
+            urls={images}
+            baseName={`douyin-${douyinData.author || "图集"}`}
+            gradient="bg-gradient-to-r from-[#fe2c55] to-[#ff6b8a] hover:opacity-90"
+            selection={gallerySel}
+          />
         </Card>
       )}
 

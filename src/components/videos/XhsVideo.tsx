@@ -6,11 +6,14 @@ import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
-import { downloadAllImages } from "@/utils/downloadImages";
-import { Download, Loader2 } from "lucide-react";
+import {
+  GalleryDownloadBar,
+  SelectableImageLink,
+  useGallerySelection,
+} from "./GalleryMultiSelect";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
 
 interface XhsVideoProps {
   data: ApiResponse;
@@ -18,7 +21,10 @@ interface XhsVideoProps {
 
 export default function XhsVideo({ data }: XhsVideoProps) {
   const [imageLoading, setImageLoading] = useState(true);
-  const [downloading, setDownloading] = useState(false);
+  // 图集多选状态（图文笔记 N 张图；张数随解析结果变化时自动清理越界勾选）
+  const gallerySel = useGallerySelection(
+    (data.data as ParseData | undefined)?.images?.filter(Boolean).length ?? 0
+  );
 
   if (!data.data) {
     return null;
@@ -35,22 +41,12 @@ export default function XhsVideo({ data }: XhsVideoProps) {
       ? `${(n / 10000).toFixed(n >= 1000000 ? 0 : 1)}万`
       : n.toLocaleString("zh-CN");
 
-  // 博主主页公开信息徽标：关注 / 粉丝 / 获赞（缺失自动隐藏）
+  // 博主主页公开信息徽标：关注 / 粉丝 / 获赞与收藏（小红书主页口径，缺失自动隐藏）
   const authorBadges: { label: string; value?: number }[] = [
     { label: "关注", value: xhsData.followingCount },
     { label: "粉丝", value: xhsData.followerCount },
-    { label: "获赞", value: xhsData.totalFavorited },
+    { label: "获赞与收藏", value: xhsData.totalFavorited },
   ];
-
-  const handleDownloadAll = async () => {
-    if (downloading || images.length === 0) return;
-    setDownloading(true);
-    try {
-      await downloadAllImages(images, `xhs-${xhsData.author || "笔记"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   return (
     <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
@@ -76,49 +72,58 @@ export default function XhsVideo({ data }: XhsVideoProps) {
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">作者</span>
                   {xhsData.authorUrl ? (
-                    <a
+                    <TruncatedText
+                      as="a"
+                      text={xhsData.author}
                       href={xhsData.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${xhsData.author} 的小红书主页`}
-                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {xhsData.author}
-                    </a>
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors"
+                    />
                   ) : (
-                    <span className="text-[13px] font-medium text-accent truncate">
-                      {xhsData.author}
-                    </span>
+                    <TruncatedText
+                      text={xhsData.author}
+                      className="text-[13px] font-medium text-accent truncate"
+                    />
                   )}
                 </div>
               )}
               {xhsData.authorId && (
-                <p className="mt-0.5 text-[13px] text-muted truncate">
-                  小红书号：{xhsData.authorId}
-                </p>
+                <TruncatedText
+                  as="p"
+                  text={`小红书号：${xhsData.authorId}`}
+                  className="mt-0.5 text-[13px] text-muted truncate"
+                />
               )}
               {xhsData.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{xhsData.sign}</span>
+                  <TruncatedText
+                    text={xhsData.sign}
+                    className="min-w-0 line-clamp-2"
+                  />
                 </p>
               )}
-              {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
-                {authorBadges.map(
-                  (badge) =>
-                    badge.value != null &&
-                    Number(badge.value) > 0 && (
-                      <span
-                        key={badge.label}
-                        className="inline-flex items-center gap-1">
-                        <span className="text-muted">{badge.label}</span>
-                        <span className="font-semibold text-primary">
-                          {formatCount(Number(badge.value))}
+              {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐）。
+                  未获取到博主信息或为脱敏估算值时整段过滤，避免展示误导性数字 */}
+              {!xhsData.statsUnreliable && (
+                <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
+                  {authorBadges.map(
+                    (badge) =>
+                      badge.value != null &&
+                      Number(badge.value) > 0 && (
+                        <span
+                          key={badge.label}
+                          className="inline-flex items-center gap-1">
+                          <span className="text-muted">{badge.label}</span>
+                          <span className="font-semibold text-primary">
+                            {formatCount(Number(badge.value))}
+                          </span>
                         </span>
-                      </span>
-                    )
-                )}
-              </div>
+                      )
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex-shrink-0">
               <PlatformIcon platform="xhs" size={40} rounded="rounded-xl" />
@@ -147,7 +152,7 @@ export default function XhsVideo({ data }: XhsVideoProps) {
               href={images[0]}
               target="_blank"
               rel="noopener noreferrer"
-              className="relative block aspect-square rounded-xl overflow-hidden bg-black">
+              className="relative block aspect-square rounded-xl overflow-hidden bg-transparent">
               {imageLoading && (
                 <div className="absolute inset-0 bg-glass-2 animate-pulse" />
               )}
@@ -175,12 +180,14 @@ export default function XhsVideo({ data }: XhsVideoProps) {
                     : "grid-cols-3"
                 }`}>
                 {images.map((imageUrl, index) => (
-                  <a
+                  <SelectableImageLink
                     key={index}
                     href={imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
+                    accent="#ff2442"
+                    selecting={gallerySel.selecting}
+                    selected={gallerySel.isSelected(index)}
+                    onToggle={() => gallerySel.toggle(index)}
+                    className={`relative aspect-square rounded-xl overflow-hidden group block bg-transparent ${
                       images.length === 4 && index >= 2 ? "col-span-1" : ""
                     }`}>
                     <Image
@@ -192,31 +199,19 @@ export default function XhsVideo({ data }: XhsVideoProps) {
                       unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </a>
+                  </SelectableImageLink>
                 ))}
               </div>
             </CollapsibleGallery>
           )}
 
-          {/* 一键下载全部图片 */}
-          <Button
-            type="button"
-            onClick={handleDownloadAll}
-            disabled={downloading}
-            size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#ff2442] to-[#ff5c7c] hover:opacity-90">
-            {downloading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在下载...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                一键下载全部图片（{images.length} 张）
-              </>
-            )}
-          </Button>
+          {/* 图集下载：选图多选下载 / 一键下载全部（多选文件名保留原图序） */}
+          <GalleryDownloadBar
+            urls={images}
+            baseName={`xhs-${xhsData.author || "笔记"}`}
+            gradient="bg-gradient-to-r from-[#ff2442] to-[#ff5c7c] hover:opacity-90"
+            selection={gallerySel}
+          />
         </Card>
       )}
 

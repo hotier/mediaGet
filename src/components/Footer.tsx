@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { siteConfig } from "@/config/site";
 import SystemInfoDialog from "./SystemInfoDialog";
 
 export default function Footer() {
@@ -29,11 +28,6 @@ export default function Footer() {
               权利通知
             </Link>
           </nav>
-
-          {/* Copyright */}
-          <p className="text-center text-xs text-muted">
-            &copy; {new Date().getFullYear()} {siteConfig.name} · {siteConfig.domain}
-          </p>
         </div>
       </div>
     </footer>

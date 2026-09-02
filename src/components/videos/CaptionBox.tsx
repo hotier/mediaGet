@@ -14,18 +14,18 @@ interface CaptionBoxProps {
   text: string;
   /** 面板标题，默认「文案」 */
   title?: string;
-  /** 折叠态最大高度，默认 max-h-32（约 6 行） */
-  maxHeightClass?: string;
 }
 
-export default function CaptionBox({
-  text,
-  title = "文案",
-  maxHeightClass = "max-h-32",
-}: CaptionBoxProps) {
+/** 折叠态限高 = 原 max-h-32（8rem = 128px，约 6 行） */
+const COLLAPSED_HEIGHT = 128;
+
+export default function CaptionBox({ text, title = "文案" }: CaptionBoxProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
+  // 内容完整高度：展开动画的精确过渡目标（避免 max-h-[2000px] 大值 hack
+  // 导致的「瞬间弹开 / 收起前死区」失真，原理与图集折叠容器一致）
+  const [contentHeight, setContentHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = useCallback(async () => {
@@ -51,12 +51,20 @@ export default function CaptionBox({
     }
   }, [text]);
 
-  // 内容高度是否超出折叠上限（容器受 max-h + overflow-hidden 约束，
-  // scrollHeight 为完整内容高度，clientHeight 为可见高度）
+  // 记录完整内容高度 + 判断是否超出折叠限高：
+  // scrollHeight 是不受 max-height/overflow-hidden 截断影响的完整内容高度，
+  // 溢出判据直接与折叠限高比较 —— 与展开态解耦，展开中触发 resize 重测也不会丢按钮。
+  // 监听 resize：卡片换行随宽度变化时同步刷新测量值。
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    setOverflow(el.scrollHeight > el.clientHeight + 1);
+    const measure = () => {
+      setContentHeight(el.scrollHeight);
+      setOverflow(el.scrollHeight > COLLAPSED_HEIGHT + 1);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, [text]);
 
   // 纯空白 / 占位符（如 B站无简介视频的 "-"）不渲染，避免出现空白卡片
@@ -85,12 +93,11 @@ export default function CaptionBox({
         </Button>
       </div>
 
-      {/* 折叠内容：限高 + 底部渐变；展开时放开高度（大值保留过渡动画） */}
+      {/* 折叠内容：限高 + 底部渐变；展开/收起在精确高度间过渡（无死区、无弹跳） */}
       <div
         ref={contentRef}
-        className={`relative overflow-hidden transition-[max-height] duration-300 ease-in-out ${
-          expanded ? "max-h-[2000px]" : maxHeightClass
-        }`}>
+        className="relative overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        style={{ maxHeight: expanded ? contentHeight : COLLAPSED_HEIGHT }}>
         <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-muted">
           {text}
         </p>
@@ -108,15 +115,15 @@ export default function CaptionBox({
             size="sm"
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
-            className="h-auto gap-1 px-2 py-1 text-xs text-muted hover:text-primary">
+            className="h-auto gap-1 px-2.5 py-1 text-[13px] text-muted hover:text-primary">
             {expanded ? (
               <>
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp className="h-4 w-4" />
                 收起
               </>
             ) : (
               <>
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="h-4 w-4" />
                 展开
               </>
             )}

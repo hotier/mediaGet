@@ -7,6 +7,7 @@ import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
 import { Card } from "@/components/ui/card";
+import TruncatedText from "@/components/ui/truncated-text";
 
 interface GenericParsedVideoProps {
   data: ApiResponse;
@@ -49,9 +50,11 @@ export default function GenericParsedVideo({
           )}
           <div className="flex-1 min-w-0">
             {d.title && (
-              <h2 className="text-lg font-semibold text-primary line-clamp-3 mb-1">
-                {d.title}
-              </h2>
+              <TruncatedText
+                as="h2"
+                text={d.title}
+                className="text-lg font-semibold text-primary line-clamp-3 mb-1"
+              />
             )}
             {d.author && (
               <p className="text-sm text-muted">{d.author}</p>

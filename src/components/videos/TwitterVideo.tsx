@@ -6,12 +6,17 @@ import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
-import { downloadAllImages } from "@/utils/downloadImages";
 import { sanitizeFilename } from "@/utils/filename";
 import { Download, Loader2 } from "lucide-react";
+import {
+  GalleryDownloadBar,
+  SelectableImageLink,
+  useGallerySelection,
+} from "./GalleryMultiSelect";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
 
 /**
  * X (Twitter) 结果卡片 —— 结构对齐微博标准：
@@ -25,9 +30,12 @@ interface TwitterVideoProps {
 
 export default function TwitterVideo({ data }: TwitterVideoProps) {
   const [imageLoading, setImageLoading] = useState(true);
-  const [downloading, setDownloading] = useState(false);
   // 一键下载全部分P视频：触发期间禁用按钮防重复
   const [downloadingAll, setDownloadingAll] = useState(false);
+  // 图集多选状态（图文 N 张图；张数随解析结果变化时自动清理越界勾选）
+  const gallerySel = useGallerySelection(
+    (data.data as ParseData | undefined)?.images?.filter(Boolean).length ?? 0
+  );
 
   if (!data.data) {
     return null;
@@ -48,16 +56,6 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
     n >= 10000
       ? `${(n / 10000).toFixed(n >= 1000000 ? 0 : 1)}万`
       : n.toLocaleString("zh-CN");
-
-  const handleDownloadAllImages = async () => {
-    if (downloading || images.length === 0) return;
-    setDownloading(true);
-    try {
-      await downloadAllImages(images, `twitter-${d.author || "图片"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   // 下载文件名：twitter-作者-标题.mp4（走代理强制保存；标题 30 字，净化后拼接）
   const downloadName = `twitter-${sanitizeFilename(
@@ -120,40 +118,56 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">作者</span>
                   {d.authorUrl ? (
-                    <a
+                    <TruncatedText
+                      as="a"
+                      text={d.author}
                       href={d.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${d.author} 的 X 主页`}
-                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {d.author}
-                    </a>
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors"
+                    />
                   ) : (
-                    <span className="text-[13px] font-medium text-accent truncate">
-                      {d.author}
-                    </span>
+                    <TruncatedText
+                      text={d.author}
+                      className="text-[13px] font-medium text-accent truncate"
+                    />
                   )}
                 </div>
               )}
               {d.authorId && (
-                <p className="mt-0.5 text-[13px] text-muted truncate">
-                  用户名：{d.authorId}
-                </p>
+                <TruncatedText
+                  as="p"
+                  text={`用户名：${d.authorId}`}
+                  className="mt-0.5 text-[13px] text-muted truncate"
+                />
               )}
               {d.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{d.sign}</span>
+                  <TruncatedText
+                    text={d.sign}
+                    className="min-w-0 line-clamp-2"
+                  />
                 </p>
               )}
               {(d.followingCount != null && d.followingCount > 0) ||
               (d.followerCount != null && d.followerCount > 0) ? (
                 <p className="mt-0.5 flex items-center gap-4 text-[13px] text-muted">
                   {d.followingCount != null && d.followingCount > 0 && (
-                    <span>关注：{formatCount(d.followingCount)}</span>
+                    <span className="inline-flex items-baseline gap-1">
+                      <span>关注：</span>
+                      <span className="font-semibold text-primary">
+                        {formatCount(d.followingCount)}
+                      </span>
+                    </span>
                   )}
                   {d.followerCount != null && d.followerCount > 0 && (
-                    <span>粉丝：{formatCount(d.followerCount)}</span>
+                    <span className="inline-flex items-baseline gap-1">
+                      <span>粉丝：</span>
+                      <span className="font-semibold text-primary">
+                        {formatCount(d.followerCount)}
+                      </span>
+                    </span>
                   )}
                 </p>
               ) : null}
@@ -217,11 +231,13 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
                     : "grid-cols-3"
                 }`}>
                 {images.map((imageUrl, index) => (
-                  <a
+                  <SelectableImageLink
                     key={index}
                     href={imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    accent="#1d9bf0"
+                    selecting={gallerySel.selecting}
+                    selected={gallerySel.isSelected(index)}
+                    onToggle={() => gallerySel.toggle(index)}
                     className="relative aspect-square rounded-xl overflow-hidden group block bg-black">
                     <Image
                       src={imageUrl}
@@ -232,31 +248,19 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
                       unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </a>
+                  </SelectableImageLink>
                 ))}
               </div>
             </CollapsibleGallery>
           )}
 
-          {/* 一键下载全部图片 */}
-          <Button
-            type="button"
-            onClick={handleDownloadAllImages}
-            disabled={downloading}
-            size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#14171a] to-[#657786] hover:opacity-90">
-            {downloading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在下载...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                一键下载全部图片（{images.length} 张）
-              </>
-            )}
-          </Button>
+          {/* 图集下载：选图多选下载 / 一键下载全部（多选文件名保留原图序） */}
+          <GalleryDownloadBar
+            urls={images}
+            baseName={`twitter-${d.author || "图片"}`}
+            gradient="bg-gradient-to-r from-[#14171a] to-[#657786] hover:opacity-90"
+            selection={gallerySel}
+          />
         </Card>
       )}
 
@@ -327,9 +331,11 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-primary truncate">
-                    P{index + 1}: {item.title || d.title || "视频"}
-                  </p>
+                  <TruncatedText
+                    as="p"
+                    text={`P${index + 1}: ${item.title || d.title || "视频"}`}
+                    className="text-sm font-medium text-primary truncate"
+                  />
                   {item.durationFormat && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                       <span className="text-xs text-muted">

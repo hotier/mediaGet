@@ -6,12 +6,17 @@ import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
-import { downloadAllImages } from "@/utils/downloadImages";
 import { sanitizeFilename } from "@/utils/filename";
 import { Download, Loader2 } from "lucide-react";
+import {
+  GalleryDownloadBar,
+  SelectableImageLink,
+  useGallerySelection,
+} from "./GalleryMultiSelect";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
 
 /**
  * 微博结果卡片 —— 结构对齐小红书标准：
@@ -25,9 +30,12 @@ interface WeiboVideoProps {
 
 export default function WeiboVideo({ data }: WeiboVideoProps) {
   const [imageLoading, setImageLoading] = useState(true);
-  const [downloading, setDownloading] = useState(false);
   // 一键下载全部分P视频：触发期间禁用按钮防重复
   const [downloadingAll, setDownloadingAll] = useState(false);
+  // 图集多选状态（图文 N 张图；张数随解析结果变化时自动清理越界勾选）
+  const gallerySel = useGallerySelection(
+    (data.data as ParseData | undefined)?.images?.filter(Boolean).length ?? 0
+  );
 
   if (!data.data) {
     return null;
@@ -70,16 +78,6 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
     { label: "关注", value: weiboData.followingCount },
     { label: "粉丝", value: weiboData.followerCount },
   ];
-
-  const handleDownloadAll = async () => {
-    if (downloading || images.length === 0) return;
-    setDownloading(true);
-    try {
-      await downloadAllImages(images, `weibo-${weiboData.author || "图片"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   // 净化文件名片段：共享工具见 @/utils/filename，移除文件系统不安全的字符并限长。
   // 微博标题常为整段博文文案，可能含换行、引号、表情、零宽字符等，直接拼文件名容易出错。
@@ -148,30 +146,36 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">作者</span>
                   {weiboData.authorUrl ? (
-                    <a
+                    <TruncatedText
+                      as="a"
+                      text={weiboData.author}
                       href={weiboData.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${weiboData.author} 的微博主页`}
-                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {weiboData.author}
-                    </a>
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors"
+                    />
                   ) : (
-                    <span className="text-[13px] font-medium text-accent truncate">
-                      {weiboData.author}
-                    </span>
+                    <TruncatedText
+                      text={weiboData.author}
+                      className="text-[13px] font-medium text-accent truncate"
+                    />
                   )}
                 </div>
               )}
               {weiboData.authorId && (
-                <p className="mt-0.5 text-[13px] text-muted truncate">
-                  微博号：{weiboData.authorId}
-                </p>
+                <TruncatedText
+                  as="p"
+                  text={`微博号：${weiboData.authorId}`}
+                  className="mt-0.5 text-[13px] text-muted truncate"
+                />
               )}
               {weiboData.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{weiboData.sign}</span>
+                  <TruncatedText
+                    text={weiboData.sign}
+                    className="min-w-0 line-clamp-2"
+                  />
                 </p>
               )}
               {/* 关注 / 粉丝（纯文本，左边缘与上方文字严格对齐） */}
@@ -253,11 +257,13 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                     : "grid-cols-3"
                 }`}>
                 {images.map((imageUrl, index) => (
-                  <a
+                  <SelectableImageLink
                     key={index}
                     href={imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    accent="#e6162d"
+                    selecting={gallerySel.selecting}
+                    selected={gallerySel.isSelected(index)}
+                    onToggle={() => gallerySel.toggle(index)}
                     className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
                       images.length === 4 && index >= 2 ? "col-span-1" : ""
                     }`}>
@@ -270,31 +276,19 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                       unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </a>
+                  </SelectableImageLink>
                 ))}
               </div>
             </CollapsibleGallery>
           )}
 
-          {/* 一键下载全部图片 */}
-          <Button
-            type="button"
-            onClick={handleDownloadAll}
-            disabled={downloading}
-            size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#e6162d] to-[#ff4d6a] hover:opacity-90">
-            {downloading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在下载...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                一键下载全部图片（{images.length} 张）
-              </>
-            )}
-          </Button>
+          {/* 图集下载：选图多选下载 / 一键下载全部（多选文件名保留原图序） */}
+          <GalleryDownloadBar
+            urls={images}
+            baseName={`weibo-${weiboData.author || "图片"}`}
+            gradient="bg-gradient-to-r from-[#e6162d] to-[#ff4d6a] hover:opacity-90"
+            selection={gallerySel}
+          />
         </Card>
       )}
 
@@ -368,9 +362,11 @@ export default function WeiboVideo({ data }: WeiboVideoProps) {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-primary truncate">
-                    P{index + 1}: {item.title || weiboData.title || "视频"}
-                  </p>
+                  <TruncatedText
+                    as="p"
+                    text={`P${index + 1}: ${item.title || weiboData.title || "视频"}`}
+                    className="text-sm font-medium text-primary truncate"
+                  />
                   {item.durationFormat && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                       <span className="text-xs text-muted">

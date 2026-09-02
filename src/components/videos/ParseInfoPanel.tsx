@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Check, Copy, Info } from "lucide-react";
 import { ParseData } from "@/types/api";
+import TruncatedText from "@/components/ui/truncated-text";
 
 /**
  * 平台感知的「作品信息面板」 —— 展示解析结果中的元数据字段。
@@ -365,11 +366,11 @@ export default function ParseInfoPanel({
             key={row.label}
             className="flex min-w-0 items-baseline justify-between gap-3">
             <dt className="shrink-0 text-[13px] text-muted">{row.label}</dt>
-            <dd
-              className="truncate text-[13px] text-primary"
-              title={row.value}>
-              {row.value}
-            </dd>
+            <TruncatedText
+              as="dd"
+              text={row.value}
+              className="min-w-0 truncate text-[13px] text-primary"
+            />
           </div>
         ))}
       </dl>

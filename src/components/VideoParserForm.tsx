@@ -36,6 +36,9 @@ interface VideoParserFormProps {
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_MAX = 20;
 
+// 表单会话：切换页面/刷新后恢复输入与平台（不含冒号，避免被上方缓存 LRU 误删）
+const FORM_SESSION_KEY = "mediaGet-form-session";
+
 // 读取缓存：命中且未过期返回数据，否则删除过期项
 function readCache(cacheKey: string): ApiResponse | null {
   const raw = sessionStorage.getItem(cacheKey);
@@ -102,6 +105,8 @@ export default function VideoParserForm({
   const [hasResult, setHasResult] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  // 是否已从会话中恢复过历史输入（用于跳过自动读剪贴板，避免覆盖上次会话）
+  const restoredRef = useRef(false);
 
   // 请求生命周期管理：避免重复请求、卸载后仍执行
   const abortRef = useRef<AbortController | null>(null);
@@ -254,11 +259,53 @@ export default function VideoParserForm({
     [debouncedParse, parseVideo, onResult, onPlatformChange]
   );
 
-  // Auto-read clipboard on mount
+  // 挂载时恢复上次会话（同标签页切页返回 / 刷新后还原输入与平台；仅还原状态，不触发解析）
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(FORM_SESSION_KEY);
+      if (!raw) return;
+      const saved: {
+        input?: string;
+        url?: string;
+        platform?: VideoPlatformKey | "auto";
+        detectedPlatform?: VideoPlatformKey | null;
+        hasResult?: boolean;
+      } = JSON.parse(raw);
+      if (saved.input) {
+        restoredRef.current = true;
+        setInput(saved.input);
+        if (saved.url) setUrl(saved.url);
+        if (saved.platform) setPlatform(saved.platform);
+        if (saved.detectedPlatform) setDetectedPlatform(saved.detectedPlatform);
+        if (saved.hasResult) setHasResult(true);
+      }
+    } catch {
+      // 损坏的会话数据：忽略，保持空白表单
+    }
+  }, []);
+
+  // 输入 / 平台 / 解析状态变化时同步会话；全部清空时移除键
+  useEffect(() => {
+    try {
+      if (!input && !url && platform === "auto" && !detectedPlatform && !hasResult) {
+        sessionStorage.removeItem(FORM_SESSION_KEY);
+      } else {
+        sessionStorage.setItem(
+          FORM_SESSION_KEY,
+          JSON.stringify({ input, url, platform, detectedPlatform, hasResult })
+        );
+      }
+    } catch {
+      // 配额满或不可写：静默失败，不影响解析主流程
+    }
+  }, [input, url, platform, detectedPlatform, hasResult]);
+
+  // Auto-read clipboard on mount（已有历史会话时跳过，避免覆盖上次输入）
   const hasAutoReadRef = useRef(false);
   useEffect(() => {
     if (hasAutoReadRef.current) return;
     hasAutoReadRef.current = true;
+    if (restoredRef.current) return;
 
     const autoReadClipboard = async () => {
       try {

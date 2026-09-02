@@ -7,11 +7,29 @@ import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import CollapsibleGallery from "./CollapsibleGallery";
-import { downloadAllImages } from "@/utils/downloadImages";
-import { Check, ChevronDown, Download, Loader2 } from "lucide-react";
+import {
+  GalleryDownloadBar,
+  SelectableImageLink,
+  useGallerySelection,
+} from "./GalleryMultiSelect";
+import { Check, ChevronDown, Download } from "lucide-react";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import TruncatedText from "@/components/ui/truncated-text";
+
+/**
+ * 站内图片代理（图集展示专用）：hdslb 图床有 Referer 防盗链 —— 实测浏览器带本站
+ * Referer 直链加载 i*.hdslb.com 会被 403（text/html 防盗链页），而服务端无 Referer
+ * fetch 返回 200。因此图文图集在展示/下载时统一包成 /api/image 代理（同源返回），
+ * 原理与后端对头像/封面/小红书/微博图片的处理一致；API 的 data.images 仍保持原图
+ * 直链（契约与 fmt=text 直链输出不受影响）。已代理路径幂等返回。
+ */
+function proxifyImageUrl(url?: string): string {
+  if (!url) return "";
+  if (url.startsWith("/api/image")) return url;
+  return `/api/image?url=${encodeURIComponent(url)}`;
+}
 
 /* ---------------- 清晰度下拉（自绘，风格与玻璃选择器一致） ---------------- */
 
@@ -163,9 +181,11 @@ function DownloadRow({
         />
       )}
       <div className="flex-1 min-w-0 basis-40">
-        <p className="text-sm font-medium text-primary truncate">
-          P{index + 1}: {item.title || fallbackTitle}
-        </p>
+        <TruncatedText
+          as="p"
+          text={`P${index + 1}: ${item.title || fallbackTitle}`}
+          className="text-sm font-medium text-primary truncate"
+        />
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {item.durationFormat && (
             <span className="text-xs text-muted">{item.durationFormat}</span>
@@ -213,9 +233,8 @@ interface BilibiliVideoProps {
 }
 
 export default function BilibiliVideo({ data }: BilibiliVideoProps) {
-  // 图文图集加载/下载状态（图片分支专用）
+  // 图文图集加载状态（图片分支专用）
   const [imageLoading, setImageLoading] = useState(true);
-  const [downloading, setDownloading] = useState(false);
 
   const parsed = data.data;
   const videoItems = parsed?.videos || [];
@@ -228,6 +247,10 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
   const isImage =
     parsed?.type === "image" && (parsed?.images?.length ?? 0) > 0;
   const images = (parsed?.images?.filter(Boolean) as string[]) || [];
+  // 图集展示/下载走站内代理（hdslb 防盗链：浏览器直链加载 403），images 直链契约不变
+  const displayImages = images.map(proxifyImageUrl);
+  // 图集多选状态（图文动态 N 张图；张数随解析结果变化时自动清理越界勾选）
+  const gallerySel = useGallerySelection(images.length);
 
   /** 下载文件名：bilibili-UP主-P分P-标题-清晰度.mp4 */
   const buildDownloadName = (
@@ -272,17 +295,6 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
     }
   };
 
-  /** 一键下载全部图片（文件名前缀 bilibili-作者名，扩展名按实际图片类型补齐） */
-  const handleDownloadAll = async () => {
-    if (downloading || images.length === 0) return;
-    setDownloading(true);
-    try {
-      await downloadAllImages(images, `bilibili-${parsed?.author || "图文动态"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   return (
     <div className="space-y-5" style={{ touchAction: 'pan-y' }}>
       {/* UP主信息卡：头像 + 昵称(可点击主页) + UID + 简介 + 关注/粉丝/获赞（主页公开信息，缺失自动隐藏） */}
@@ -307,30 +319,36 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] text-secondary">UP主</span>
                   {parsed.authorUrl ? (
-                    <a
+                    <TruncatedText
+                      as="a"
+                      text={parsed.author}
                       href={parsed.authorUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={`打开 ${parsed.author} 的B站主页`}
-                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors">
-                      {parsed.author}
-                    </a>
+                      className="text-[13px] font-medium text-accent truncate hover:underline hover:text-accent/80 transition-colors"
+                    />
                   ) : (
-                    <span className="text-[13px] font-medium text-accent truncate">
-                      {parsed.author}
-                    </span>
+                    <TruncatedText
+                      text={parsed.author}
+                      className="text-[13px] font-medium text-accent truncate"
+                    />
                   )}
                 </div>
               )}
               {parsed?.authorId && (
-                <p className="mt-0.5 text-[13px] text-muted truncate">
-                  UID：{parsed.authorId}
-                </p>
+                <TruncatedText
+                  as="p"
+                  text={`UID：${parsed.authorId}`}
+                  className="mt-0.5 text-[13px] text-muted truncate"
+                />
               )}
               {parsed?.sign && (
                 <p className="mt-0.5 flex items-start gap-1 text-[13px] text-muted">
                   <span className="flex-shrink-0">简介：</span>
-                  <span className="min-w-0 line-clamp-2">{parsed.sign}</span>
+                  <TruncatedText
+                    text={parsed.sign}
+                    className="min-w-0 line-clamp-2"
+                  />
                 </p>
               )}
               {/* 关注 / 粉丝 / 获赞（纯文本，左边缘与上方文字严格对齐） */}
@@ -381,7 +399,7 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
         <Card className="p-3">
           {images.length === 1 ? (
             <a
-              href={images[0]}
+              href={displayImages[0]}
               target="_blank"
               rel="noopener noreferrer"
               className="relative block aspect-square rounded-xl overflow-hidden bg-black">
@@ -389,7 +407,7 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
                 <div className="absolute inset-0 bg-glass-2 animate-pulse" />
               )}
               <Image
-                src={images[0]}
+                src={displayImages[0]}
                 alt={parsed?.title || "图片"}
                 fill
                 sizes="(max-width: 800px) 100vw, 800px"
@@ -397,6 +415,7 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
                 priority
                 unoptimized
                 onLoad={() => setImageLoading(false)}
+                onError={() => setImageLoading(false)}
               />
             </a>
           ) : (
@@ -411,12 +430,14 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
                         ? "grid-cols-2"
                         : "grid-cols-3"
                 }`}>
-                {images.map((imageUrl, index) => (
-                  <a
+                {displayImages.map((imageUrl, index) => (
+                  <SelectableImageLink
                     key={index}
                     href={imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    accent="#00aeec"
+                    selecting={gallerySel.selecting}
+                    selected={gallerySel.isSelected(index)}
+                    onToggle={() => gallerySel.toggle(index)}
                     className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
                       images.length === 4 && index >= 2 ? "col-span-1" : ""
                     }`}>
@@ -429,31 +450,19 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
                       unoptimized
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </a>
+                  </SelectableImageLink>
                 ))}
               </div>
             </CollapsibleGallery>
           )}
 
-          {/* 一键下载全部图片 */}
-          <Button
-            type="button"
-            onClick={handleDownloadAll}
-            disabled={downloading}
-            size="lg"
-            className="mt-3 w-full bg-gradient-to-r from-[#00aeec] to-[#4dc9ff] hover:opacity-90">
-            {downloading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在下载...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                一键下载全部图片（{images.length} 张）
-              </>
-            )}
-          </Button>
+          {/* 图集下载：选图多选下载 / 一键下载全部（多选文件名保留原图序） */}
+          <GalleryDownloadBar
+            urls={displayImages}
+            baseName={`bilibili-${parsed?.author || "图文动态"}`}
+            gradient="bg-gradient-to-r from-[#00aeec] to-[#4dc9ff] hover:opacity-90"
+            selection={gallerySel}
+          />
         </Card>
       )}
 
