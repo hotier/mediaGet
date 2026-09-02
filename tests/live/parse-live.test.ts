@@ -91,6 +91,12 @@ const CASES = [
     GET: GETBilibili,
   },
   {
+    id: "bilibili-opus",
+    path: "/api/bilibili",
+    envKey: "LIVE_URL_BILIBILI_OPUS",
+    GET: GETBilibili,
+  },
+  {
     id: "kuaishou",
     path: "/api/kuaishou",
     envKey: "LIVE_URL_KUAISHOU",

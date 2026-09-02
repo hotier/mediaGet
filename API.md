@@ -193,6 +193,7 @@ GET /api/douyin?url=https://v.douyin.com/kB9dI20w7vk/
 - `https://b23.tv/xxx`
 - `https://www.bilibili.com/video/BVxxx`
 - `https://m.bilibili.com/video/BVxxx`
+- `https://www.bilibili.com/opus/<id>` / `https://m.bilibili.com/opus/<id>`（图文动态，返回 `type: "image"` + `images[]`；专栏文章等非纯图文会返回错误提示）
 
 **示例请求**:
 ```
@@ -225,6 +226,10 @@ GET /api/bilibili?url=https://b23.tv/abcDEFg
 ```
 
 > 注：已统一为 `code: 200`；分P 列表在 `data.videos`，作者信息在 `data.author` / `data.avatar`。
+
+**图文动态响应补充**：图文动态为纯图片内容，无 `videos`/`url`；图片直链在 `data.images`（原图，已统一 https），`data.cover` 为首图，`data.desc` 为动态文案，`data.type` 为 `"image"`。前端展示为图集卡片并支持一键下载全部图片。
+
+> 注：图文动态解析内部使用现代浏览器 User-Agent 访问 detail 接口——旧 UA 会被 B 站风控拦截（`-352`），该实现细节与接口可用性相关，调用方无需自行处理。
 
 ---
 
