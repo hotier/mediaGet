@@ -205,6 +205,15 @@ const PLATFORM_FIELDS: Record<string, FieldDef[]> = {
       format: () => "视频",
     },
   ],
+  // B站图文动态（/opus/）：动态标题 + 发布时间 + 互动统计（统计由后端归一到 stat.like/reply/share）
+  bilibiliOpus: [
+    { key: "title", label: "动态标题" },
+    { key: "time", label: "发布时间", format: formatTime },
+    { key: "stat.like", label: "点赞", format: formatCount },
+    { key: "stat.reply", label: "评论", format: formatCount },
+    { key: "stat.share", label: "分享", format: formatCount },
+    TYPE_FIELD,
+  ],
   // 博主卡已展示：昵称 / 小红书号 / 简介 / 关注 / 粉丝 / 获赞，这里只保留帖子（笔记）相关信息
   xhs: [
     { key: "title", label: "笔记标题" },

@@ -6,7 +6,9 @@ import { sanitizeFilename } from "@/utils/filename";
 import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
-import { Check, ChevronDown, Download } from "lucide-react";
+import CollapsibleGallery from "./CollapsibleGallery";
+import { downloadAllImages } from "@/utils/downloadImages";
+import { Check, ChevronDown, Download, Loader2 } from "lucide-react";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -211,6 +213,10 @@ interface BilibiliVideoProps {
 }
 
 export default function BilibiliVideo({ data }: BilibiliVideoProps) {
+  // 图文图集加载/下载状态（图片分支专用）
+  const [imageLoading, setImageLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+
   const parsed = data.data;
   const videoItems = parsed?.videos || [];
   const hasVideo = videoItems.length > 0;
@@ -218,6 +224,10 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
   // 可内嵌当前页 <video> 播放
   const primaryVideoUrl = hasVideo ? videoItems[0].url : "";
   const posterUrl = parsed?.cover || undefined;
+  // 图文动态（/opus/）归一化后 type="image" + images[]，走图集卡片分支
+  const isImage =
+    parsed?.type === "image" && (parsed?.images?.length ?? 0) > 0;
+  const images = (parsed?.images?.filter(Boolean) as string[]) || [];
 
   /** 下载文件名：bilibili-UP主-P分P-标题-清晰度.mp4 */
   const buildDownloadName = (
@@ -259,6 +269,17 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
       document
         .getElementById("bilibili-download")
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  /** 一键下载全部图片（文件名前缀 bilibili-作者名，扩展名按实际图片类型补齐） */
+  const handleDownloadAll = async () => {
+    if (downloading || images.length === 0) return;
+    setDownloading(true);
+    try {
+      await downloadAllImages(images, `bilibili-${parsed?.author || "图文动态"}`);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -354,11 +375,99 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
         />
       )}
 
-      {/* 文案：视频下方，可一键复制 */}
-      {parsed?.desc && <CaptionBox text={parsed.desc} title="视频简介" />}
+      {/* 图文图集：单图大图（B站蓝主题）/ 多图网格（2/3/4 张自适应），点击打开原图，
+          与小红书图集卡片交互一致；封面 alt 文案与图片命名同用动态标题 */}
+      {isImage && images.length > 0 && (
+        <Card className="p-3">
+          {images.length === 1 ? (
+            <a
+              href={images[0]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="relative block aspect-square rounded-xl overflow-hidden bg-black">
+              {imageLoading && (
+                <div className="absolute inset-0 bg-glass-2 animate-pulse" />
+              )}
+              <Image
+                src={images[0]}
+                alt={parsed?.title || "图片"}
+                fill
+                sizes="(max-width: 800px) 100vw, 800px"
+                className="object-cover"
+                priority
+                unoptimized
+                onLoad={() => setImageLoading(false)}
+              />
+            </a>
+          ) : (
+            <CollapsibleGallery>
+              <div
+                className={`grid gap-2 ${
+                  images.length === 2
+                    ? "grid-cols-2"
+                    : images.length === 3
+                      ? "grid-cols-3"
+                      : images.length === 4
+                        ? "grid-cols-2"
+                        : "grid-cols-3"
+                }`}>
+                {images.map((imageUrl, index) => (
+                  <a
+                    key={index}
+                    href={imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`relative aspect-square rounded-xl overflow-hidden group block bg-black ${
+                      images.length === 4 && index >= 2 ? "col-span-1" : ""
+                    }`}>
+                    <Image
+                      src={imageUrl}
+                      alt={`${parsed?.title || "图片"} ${index + 1}`}
+                      fill
+                      sizes="(max-width: 800px) 50vw, 400px"
+                      className="object-cover transition-transform duration-500 group-hover:scale-105"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </a>
+                ))}
+              </div>
+            </CollapsibleGallery>
+          )}
 
-      {/* 视频信息：UP主 / 分P数量（放在简介下方） */}
-      <ParseInfoPanel platform="bilibili" data={parsed} title="视频信息" />
+          {/* 一键下载全部图片 */}
+          <Button
+            type="button"
+            onClick={handleDownloadAll}
+            disabled={downloading}
+            size="lg"
+            className="mt-3 w-full bg-gradient-to-r from-[#00aeec] to-[#4dc9ff] hover:opacity-90">
+            {downloading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在下载...
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" />
+                一键下载全部图片（{images.length} 张）
+              </>
+            )}
+          </Button>
+        </Card>
+      )}
+
+      {/* 文案：视频简介 / 图文动态文案，可一键复制 */}
+      {parsed?.desc && (
+        <CaptionBox text={parsed.desc} title={isImage ? "动态文案" : "视频简介"} />
+      )}
+
+      {/* 信息面板：视频信息 / 图文信息（图文用专用字段集避免「视频标题/视频」错标） */}
+      <ParseInfoPanel
+        platform={isImage ? "bilibiliOpus" : "bilibili"}
+        data={parsed}
+        title={isImage ? "图文信息" : "视频信息"}
+      />
 
       {/* Download Options：微博同款紧凑布局 —— 每个分P一行（封面 / P序号标题 / 时长），
           多清晰度时行内下拉切换档位，点「下载」走视频代理 + Content-Disposition 强制保存文件 */}
