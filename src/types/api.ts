@@ -99,6 +99,8 @@ export interface ParseData {
   followingCount?: number;
   /** 获赞数（抖音博主主页公开信息） */
   totalFavorited?: number;
+  /** 小红书：主页统计是否被脱敏（未登录会话时小红书降级为固定估算低值，非精确数据） */
+  statsUnreliable?: boolean;
   music?: { author: string; title?: string; avatar: string };
 }
 

@@ -350,64 +350,8 @@ async function getBilibiliVideoInfo(url) {
     
     // UP主主页公开统计：关注 / 粉丝 / 获赞 / 简介（接口可能被风控或需登录，失败不影响主流程）
     const mid = videoInfo.data.owner.mid;
-    let followingCount, followerCount, totalFavorited, upSign = "";
-    try {
-      // 带上 buvid 通行证（部分出口 IP 无 cookie 直调会被 -352 风控拦截）
-      const { b3, b4 } = await getBuvid();
-      const upCookie = [BILIBILI_COOKIE, `buvid3=${b3}`, `buvid4=${b4}`]
-        .filter(Boolean)
-        .join("; ");
-      // 网页端「用户卡片」接口：wbi + buvid 即可匿名返回 card.sign（UP主简介）/
-      // follower（粉丝）/ like_num（获赞），是空间页首屏数据源，对访客最宽容；
-      // 而 space/wbi/acc/info 自 2026 年起对访客普遍返回 -352，不再作为主来源。
-      const signedCardQuery = await wbiSign({ mid }).catch(() => "");
-      const cardUrl = signedCardQuery
-        ? `https://api.bilibili.com/x/web-interface/card?${signedCardQuery}`
-        : `https://api.bilibili.com/x/web-interface/card?mid=${mid}`;
-      const [relationStat, cardInfo, legacySpaceInfo] = await Promise.allSettled([
-        bilibiliRequest(
-          `https://api.bilibili.com/x/relation/stat?vmid=${mid}`,
-          headers
-        ),
-        bilibiliRequest(cardUrl, {
-          Cookie: upCookie,
-          "User-Agent": MODERN_USER_AGENT,
-        }),
-        // 空间旧接口：部分出口（如家宽 IP）无需 wbi 也能返回 sign，作为简介兜底
-        bilibiliRequest(
-          `https://api.bilibili.com/x/space/acc/info?mid=${mid}`,
-          {
-            "User-Agent": MODERN_USER_AGENT,
-            Referer: `https://space.bilibili.com/${mid}`,
-            Origin: "https://space.bilibili.com",
-          }
-        ),
-      ]);
-      if (relationStat.status === "fulfilled" && relationStat.value?.code === 0) {
-        followingCount = relationStat.value.data.following;
-        followerCount = relationStat.value.data.follower;
-      }
-      if (cardInfo.status === "fulfilled" && cardInfo.value?.code === 0) {
-        const cardData = cardInfo.value.data || {};
-        upSign = cardData.card?.sign || "";
-        totalFavorited = cardData.like_num;
-        // card 的粉丝数兜底（relation/stat 被风控时仍可展示）
-        if (followerCount == null && typeof cardData.follower === "number") {
-          followerCount = cardData.follower;
-        }
-      }
-      // legacy 空间接口返回简介时覆盖（个别出口 card 被拦但该接口可用）
-      if (
-        legacySpaceInfo.status === "fulfilled" &&
-        legacySpaceInfo.value?.code === 0 &&
-        legacySpaceInfo.value?.data?.sign
-      ) {
-        upSign = legacySpaceInfo.value.data.sign;
-      }
-    } catch (error) {
-      logger.error("Failed to fetch up stats:", error.message);
-    }
-    
+    const upStats = await fetchBilibiliUpStats(mid);
+
     return {
       code: 1,
       msg: "解析成功！",
@@ -424,19 +368,86 @@ async function getBilibiliVideoInfo(url) {
       user: {
         name: videoInfo.data.owner.name,
         user_img: proxifyImage(videoInfo.data.owner.face),
-        sign: upSign || videoInfo.data.owner.sign || "",
+        sign: upStats.sign || videoInfo.data.owner.sign || "",
         uid: videoInfo.data.owner.mid,
         // UP主主页链接：由 mid 拼 space 首页（前端可点击跳转）
         authorUrl: `https://space.bilibili.com/${mid}`,
-        followingCount,
-        followerCount,
-        totalFavorited,
+        followingCount: upStats.followingCount,
+        followerCount: upStats.followerCount,
+        totalFavorited: upStats.totalFavorited,
       },
     };
   } catch (error) {
     logger.error("Error parsing bilibili video:", error.message);
     return { code: 0, msg: "解析失败！" };
   }
+}
+
+/**
+ * UP主主页公开统计：关注 / 粉丝 / 获赞 / 简介（空间首页公开数据，匿名可获取）。
+ * 接口可能被风控或需登录，静默失败不影响主流程（返回空对象，缺失字段前端自动隐藏）。
+ * 网页端「用户卡片」接口：wbi + buvid 即可匿名返回 card.sign（UP主简介）/
+ * follower（粉丝）/ like_num（获赞），是空间页首屏数据源，对访客最宽容；
+ * 而 space/wbi/acc/info 自 2026 年起对访客普遍返回 -352，仅作简介兜底。
+ * 供视频解析与图文动态（/opus/）解析共用。
+ */
+async function fetchBilibiliUpStats(mid) {
+  const stats = {};
+  try {
+    // 带上 buvid 通行证（部分出口 IP 无 cookie 直调会被 -352 风控拦截）
+    const { b3, b4 } = await getBuvid();
+    const upCookie = [BILIBILI_COOKIE, `buvid3=${b3}`, `buvid4=${b4}`]
+      .filter(Boolean)
+      .join("; ");
+    const headers = { "Content-Type": "application/json;charset=UTF-8" };
+    const signedCardQuery = await wbiSign({ mid }).catch(() => "");
+    const cardUrl = signedCardQuery
+      ? `https://api.bilibili.com/x/web-interface/card?${signedCardQuery}`
+      : `https://api.bilibili.com/x/web-interface/card?mid=${mid}`;
+    const [relationStat, cardInfo, legacySpaceInfo] = await Promise.allSettled([
+      bilibiliRequest(
+        `https://api.bilibili.com/x/relation/stat?vmid=${mid}`,
+        headers
+      ),
+      bilibiliRequest(cardUrl, {
+        Cookie: upCookie,
+        "User-Agent": MODERN_USER_AGENT,
+      }),
+      // 空间旧接口：部分出口（如家宽 IP）无需 wbi 也能返回 sign，作为简介兜底
+      bilibiliRequest(
+        `https://api.bilibili.com/x/space/acc/info?mid=${mid}`,
+        {
+          "User-Agent": MODERN_USER_AGENT,
+          Referer: `https://space.bilibili.com/${mid}`,
+          Origin: "https://space.bilibili.com",
+        }
+      ),
+    ]);
+    if (relationStat.status === "fulfilled" && relationStat.value?.code === 0) {
+      stats.followingCount = relationStat.value.data.following;
+      stats.followerCount = relationStat.value.data.follower;
+    }
+    if (cardInfo.status === "fulfilled" && cardInfo.value?.code === 0) {
+      const cardData = cardInfo.value.data || {};
+      stats.sign = cardData.card?.sign || "";
+      stats.totalFavorited = cardData.like_num;
+      // card 的粉丝数兜底（relation/stat 被风控时仍可展示）
+      if (stats.followerCount == null && typeof cardData.follower === "number") {
+        stats.followerCount = cardData.follower;
+      }
+    }
+    // legacy 空间接口返回简介时覆盖（个别出口 card 被拦但该接口可用）
+    if (
+      legacySpaceInfo.status === "fulfilled" &&
+      legacySpaceInfo.value?.code === 0 &&
+      legacySpaceInfo.value?.data?.sign
+    ) {
+      stats.sign = legacySpaceInfo.value.data.sign;
+    }
+  } catch (error) {
+    logger.error("Failed to fetch up stats:", error.message);
+  }
+  return stats;
 }
 
 /**
@@ -463,8 +474,17 @@ async function parseBilibiliOpus(url, opusId) {
     }
     const outcome = classifyOpusDetail(detail);
     if (!outcome.ok) return { code: 0, msg: outcome.msg };
-    logger.log(`Successfully parsed bilibili opus ${opusId}, images: ${outcome.data.images.length}`);
-    return { code: 200, msg: "解析成功！", data: outcome.data };
+    const data = outcome.data;
+    // UP主主页公开统计与简介：detail 接口仅给 mid/name/face，粉丝/关注/获赞/简介
+    // 需补调空间公开接口（匿名可获取；被风控时静默失败，缺失字段前端自动隐藏）。
+    // 平铺进 data 与视频解析归一化后的 ParseData 字段对齐（author/sign/followingCount/...）
+    const upStats = await fetchBilibiliUpStats(data.authorId);
+    data.sign = upStats.sign || undefined;
+    data.followingCount = upStats.followingCount;
+    data.followerCount = upStats.followerCount;
+    data.totalFavorited = upStats.totalFavorited;
+    logger.log(`Successfully parsed bilibili opus ${opusId}, images: ${data.images.length}`);
+    return { code: 200, msg: "解析成功！", data };
   } catch (error) {
     logger.error("Error parsing bilibili opus:", error.message);
     return { code: 0, msg: "解析失败！" };

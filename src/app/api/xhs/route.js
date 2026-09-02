@@ -16,6 +16,10 @@ const XHS_COOKIE = process.env.XHS_COOKIE || "";
 // Node fetch 不自动保存 Cookie，这里累积各响应 set-cookie 供后续请求使用。
 const xhsCookiePool = {};
 
+// 博主主页统计进程内缓存（TTL 10 分钟）：同一博主连续解析多篇笔记时避免重复抓主页
+const xhsProfileCache = new Map();
+const XHS_PROFILE_CACHE_TTL = 10 * 60 * 1000;
+
 function absorbXhsCookies(response) {
   try {
     const list =
@@ -252,6 +256,241 @@ function extractInitialStateJson(html) {
   return inline?.[1]?.trim() ?? null;
 }
 
+/** 小红书计数归一化：兼容数字 / 数字字符串 / 尾随"+" / K(千) / 万 / 亿单位（"10+"、"1K+"、"10K+"、"1万+"、"1.2亿+"） */
+function parseXhsCount(v) {
+  if (v == null || v === "") return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? Math.round(v) : 0;
+  const s = String(v).trim().replace(/[+\s]/g, "");
+  const w = /^([\d.]+)万$/.exec(s);
+  if (w) return Math.round(parseFloat(w[1]) * 10000);
+  const y = /^([\d.]+)亿$/.exec(s);
+  if (y) return Math.round(parseFloat(y[1]) * 100000000);
+  const k = /^([\d.]+)[kK]$/.exec(s);
+  if (k) return Math.round(parseFloat(k[1]) * 1000);
+  const n = Number(s.replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+/**
+ * 从博主主页初始状态提取关注/粉丝/获赞与收藏计数。
+ * 主页结构随版本多变，提供多条兜底路径（新版 user.userPageData → 旧版 userPageData）。
+ * 计数对象可能直接带 counts，也可能计数平铺在页面数据上，因此统一按字段名探测。
+ */
+function extractXhsUserStats(decoded) {
+  const pageData =
+    safeGet(decoded, "user.userPageData") ||
+    safeGet(decoded, "userPageData") ||
+    safeGet(decoded, "userData") ||
+    null;
+  if (!pageData || typeof pageData !== "object") return null;
+
+  let followingCount = 0;
+  let followerCount = 0;
+  let totalFavorited = 0;
+  // 脱敏检测：小红书对「无登录会话」的请求会把主页三项统计统一降级为
+  // 固定低值、且每项都带「+」尾缀的估算文案（10+ / 1万+ / 10K+）。
+  // 登录态真实数据不带「+」（如 831 / 2.5万 / 15.7万）。带 + 项占多数即判定脱敏。
+  let unreliable = false;
+
+  // 新版主页：interactions 数组按 type 区分
+  // [{type:"follows",name:"关注",count:"10+"},{type:"fans",name:"粉丝",count:"1万+"},{type:"interaction",name:"获赞与收藏",count:"1万+"}]
+  if (Array.isArray(pageData.interactions)) {
+    // 诊断：打印主页 interactions 原始项（type/count/i18nCount），便于核对映射
+    try {
+      console.log(
+        "[xhs] interactions raw:",
+        JSON.stringify(
+          pageData.interactions.map((i) => ({
+            type: i && i.type,
+            name: i && i.name,
+            count: i && i.count,
+            i18nCount: i && i.i18nCount,
+          }))
+        )
+      );
+    } catch {
+      /* debug only */
+    }
+    // 脱敏模板判定：仅以「+」尾缀为信号。真实数据 831/2.5万/15.7万 不带 +，
+    // 但同样带「万」单位，因此不能把单位本身当作脱敏特征。
+    const isSanitized = (v) => typeof v === "string" && /[+＋]/.test(v);
+    let sanitizedHits = 0;
+    let sanitizedTotal = 0;
+    for (const item of pageData.interactions) {
+      if (!item || typeof item !== "object") continue;
+      const raw = item.count ?? item.i18nCount;
+      if (raw !== undefined && raw !== null && raw !== "") {
+        sanitizedTotal += 1;
+        if (isSanitized(raw)) sanitizedHits += 1;
+      }
+      const v = parseXhsCount(raw);
+      if (item.type === "follows") followingCount = v;
+      else if (item.type === "fans") followerCount = v;
+      else if (item.type === "interaction" || item.type === "liked")
+        totalFavorited = v;
+    }
+    // 带「+」项占多数 → 判定为脱敏数据（非精确值）
+    unreliable = sanitizedTotal > 0 && sanitizedHits * 2 >= sanitizedTotal;
+  } else {
+    // 旧版主页：counts 对象
+    const counts = pageData.counts || pageData;
+    if (counts && typeof counts === "object") {
+      // 字段名新旧兼容：follows/following/followingCount；fans/follower/followerCount；
+      // interactions（小红书口径：获赞与收藏）/likedCount/likes
+      followingCount = parseXhsCount(
+        counts.follows ?? counts.followingCount ?? counts.following
+      );
+      followerCount = parseXhsCount(
+        counts.fans ?? counts.followerCount ?? counts.follower
+      );
+      totalFavorited = parseXhsCount(
+        counts.interactions ??
+          counts.totalFavorited ??
+          counts.likedCount ??
+          counts.likes
+      );
+    }
+  }
+
+  // 主页简介（basicInfo.desc）兜底笔记页缺失的简介
+  const basic = pageData.basicInfo || pageData || null;
+  const sign =
+    (basic && (basic.desc ?? basic.description ?? basic.sign)) || "";
+  // 主页博主身份（用于与笔记作者比对，防止主页抓错用户）
+  // redId = 自定义小红书号（如 635198943，主页「小红书号」展示用）；
+  // nickname = 昵称；userKey 兜底组合，供旧版校验复用
+  const redId = (basic && (basic.redId || basic.userId)) || "";
+  const nickname =
+    (basic && (basic.nickname ?? basic.nickName ?? basic.name)) || "";
+  const userKey = redId || nickname;
+
+  if (followerCount || followingCount || totalFavorited || sign) {
+    return {
+      followingCount,
+      followerCount,
+      totalFavorited,
+      sign,
+      redId,
+      nickname,
+      userKey,
+      unreliable,
+    };
+  }
+  return null;
+}
+
+/** 调试用：递归找到第一个同时含粉丝/关注等键的对象，帮助定位主页结构变化 */
+function findCountsHolder(obj, keys, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 5) return null;
+  if (keys.some((k) => k in obj)) return obj;
+  for (const k of Object.keys(obj)) {
+    // 跳过超大列表字段，避免无谓深挖与输出爆炸
+    if (
+      ["notes", "noteList", "noteDetailMap", "noteMap", "comments"].includes(
+        k
+      )
+    ) {
+      continue;
+    }
+    const r = findCountsHolder(obj[k], keys, depth + 1);
+    if (r) return r;
+  }
+  return null;
+}
+
+/**
+ * 从笔记 HTML 提取作者主页链接里的 xsec_token。
+ * 小红书要求主页访问带专属 token，否则会被风控或返回错配用户数据，
+ * 因此不能直接裸请求 /user/profile/{id}，需复用笔记页里现成的作者主页 token。
+ */
+function extractProfileToken(html, userId) {
+  if (!html) return "";
+  try {
+    const re = new RegExp(
+      `/user/profile/${userId}[^"'<>\\s]*?xsec_token=([^"'<>\\s&]+)`
+    );
+    const m = html.match(re);
+    if (m?.[1]) return decodeURIComponent(m[1]);
+    // 兜底：任意作者主页链接里的 token
+    const m2 = html.match(
+      /\/user\/profile\/[^"'<>\\s]*?xsec_token=([^"'<>\\s&]+)/
+    );
+    if (m2?.[1]) return decodeURIComponent(m2[1]);
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+/**
+ * 博主主页公开统计（关注/粉丝/获赞与收藏）：
+ * 笔记页不含这些数据，需额外抓一次博主主页再解 __INITIAL_STATE__。
+ * 主页 URL 必须携带笔记 HTML 中提取的 xsec_token，否则易被风控/错配。
+ * 任何一步失败都静默返回 null —— 缺失字段前端自动隐藏，不影响主解析结果。
+ */
+async function fetchXhsProfileStats(userId, xsecToken = "") {
+  if (!userId) return null;
+  // 命中缓存直接返回，避免同博主多次解析重复抓主页
+  const cached = xhsProfileCache.get(userId);
+  if (cached) return cached;
+  const profileUrl = xsecToken
+    ? `https://www.xiaohongshu.com/user/profile/${userId}?xsec_token=${encodeURIComponent(
+        xsecToken
+      )}&xsec_source=pc_user`
+    : `https://www.xiaohongshu.com/user/profile/${userId}`;
+  try {
+    const { html } = await fetchXhsNoteHtml(profileUrl);
+    const jsonRaw = html ? extractInitialStateJson(html) : null;
+    if (!jsonRaw) return null;
+    let decoded;
+    try {
+      decoded = JSON.parse(jsonRaw.replace(/undefined/g, "null"));
+    } catch {
+      return null;
+    }
+    const stats = extractXhsUserStats(decoded);
+    // 结构探测：统计全为 0 / 缺失时打印主页实际字段，便于定位字段名变化
+    if (
+      !stats ||
+      (!stats.followingCount && !stats.followerCount && !stats.totalFavorited)
+    ) {
+      try {
+        const holder = findCountsHolder(decoded, [
+          "fans",
+          "followerCount",
+          "follows",
+          "followingCount",
+          "interactions",
+        ]);
+        console.log(
+          "[xhs] profile empty, topKeys:",
+          Object.keys(decoded).join(",")
+        );
+        if (holder) {
+          console.log(
+            "[xhs] profile holder sample:",
+            JSON.stringify(holder).slice(0, 800)
+          );
+        }
+      } catch {
+        /* debug only */
+      }
+    }
+    // 只缓存成功结果；失败的（风控/结构变化）留待下次重新尝试
+    if (stats) {
+      xhsProfileCache.set(userId, stats);
+      setTimeout(
+        () => xhsProfileCache.delete(userId),
+        XHS_PROFILE_CACHE_TTL
+      );
+    }
+    return stats;
+  } catch (error) {
+    console.log("[xhs] profile stats failed:", error.message);
+    return null;
+  }
+}
+
 /**
  * 把第三方图片 URL 包成站内代理路径，绕过 Referer 防盗链
  * （如小红书 sns-webpic 只允许 Referer: xiaohongshu.com）。
@@ -371,7 +610,7 @@ async function xhs(url) {
     }
 
     // 安全地构建基础数据
-    // 小红书号优先取 user.redId（自定义号），缺失时回退 userId
+    // 内部 userId（16 进制）仅用于拼博主主页链接与抓主页，不对外展示
     const userId =
       safeGet(noteData, "user.userId") || safeGet(noteData, "user.id") || "";
     // 互动统计：主路径取 noteData.interactInfo，缺失时从 noteDetailMap 全量兜底
@@ -382,7 +621,9 @@ async function xhs(url) {
         safeGet(noteData, "user.nickname") ||
         safeGet(noteData, "user.name") ||
         "",
-      authorID: safeGet(noteData, "user.redId") || userId,
+      // 小红书号（自定义号）：只填真实 redId；笔记页缺失时稍后由主页数据补齐，
+      // 绝不回退内部 userId（16 进制内部标识，与主页展示的自定义号不一致）
+      authorID: safeGet(noteData, "user.redId") || "",
       // 博主主页链接：由 userId 拼 profile 首页（前端可点击跳转）
       authorUrl: userId
         ? `https://www.xiaohongshu.com/user/profile/${userId}`
@@ -413,6 +654,46 @@ async function xhs(url) {
       share: safeGet(interactInfo, "sharedCount") ?? "",
       noteId: noteData.noteId ?? "",
     };
+
+    // 博主主页公开统计（关注/粉丝/获赞与收藏）与简介兜底：笔记页不含统计，
+    // 额外抓一次主页补齐；失败/被风控时静默降级，缺失字段前端徽标自动隐藏。
+    if (userId) {
+      const stats = await fetchXhsProfileStats(
+        userId,
+        extractProfileToken(html, userId)
+      );
+      if (stats) {
+        // 身份校验：主页数据必须与笔记指向同一博主，避免张冠李戴
+        // - 笔记页带自定义号(redId)：主页 redId 须一致（主页 redId 缺失时按昵称比对）
+        // - 笔记页无 redId（仅有内部 userId）：主页昵称须与笔记作者一致
+        const noteRedId = data.authorID || "";
+        const pageMatches = noteRedId
+          ? stats.userKey === noteRedId ||
+            (stats.nickname && stats.nickname === data.author)
+          : !stats.nickname || stats.nickname === data.author;
+        if (pageMatches) {
+          // 小红书号以主页为准：笔记页缺失 redId 时补齐，保证与博主主页显示一致
+          if (stats.redId) data.authorID = stats.redId;
+          data.followingCount = stats.followingCount;
+          data.followerCount = stats.followerCount;
+          data.totalFavorited = stats.totalFavorited;
+          if (!data.sign && stats.sign) data.sign = stats.sign;
+          console.log(
+            `[xhs] profile stats: 关注=${stats.followingCount} 粉丝=${stats.followerCount} 获赞与收藏=${stats.totalFavorited}`
+          );
+          if (stats.unreliable) {
+            data.statsUnreliable = true;
+            console.log(
+              "[xhs] profile stats SANITIZED: XHS_COOKIE 缺失或已过期，主页统计为脱敏估算值，配置登录 Cookie 后显示精确数据"
+            );
+          }
+        } else {
+          console.log(
+            `[xhs] profile mismatch: page user=[${stats.userKey}] vs note user=[${noteRedId}] ${data.author}, skipped`
+          );
+        }
+      }
+    }
 
     // 检查视频URL
     let videoUrl = null;
