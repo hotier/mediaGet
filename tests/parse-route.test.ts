@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GET } from "@/app/api/parse/route.js";
+import { GET, POST } from "@/app/api/parse/route.js";
 
 describe("parse route", () => {
   const originalFetch = global.fetch;
@@ -160,5 +160,99 @@ describe("parse route", () => {
       data: { type: "image", title: "测试笔记", author: "测试作者" },
     });
     expect(json.data.images[0]).toContain("/api/image?url=");
+  });
+
+  it("supports text= share-copy mode (parse-text capability merged in)", async () => {
+    const shareText =
+      "【测试笔记】复制打开小红书，看看 https://www.xiaohongshu.com/explore/65f0c0e5000000001203d2a3 的内容";
+    const noteId = "65f0c0e5000000001203d2a3";
+    const initialState = {
+      note: {
+        currentNoteId: noteId,
+        noteDetailMap: {
+          [noteId]: {
+            note: {
+              title: "测试笔记",
+              desc: "测试描述",
+              user: { nickName: "测试作者", userId: "u1" },
+              imageList: [
+                {
+                  urlDefault:
+                    "https://sns-webpic-qc.xhscdn.com/202401/img1.jpg",
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const pageHtml = `<html><script>window.__INITIAL_STATE__=${JSON.stringify(
+      initialState
+    )}</script></html>`;
+
+    global.fetch = vi.fn().mockResolvedValue(new Response(pageHtml));
+
+    const res = await GET(
+      new Request(
+        `http://127.0.0.1/api/parse?text=${encodeURIComponent(shareText)}`,
+        { headers: { "x-forwarded-for": "203.0.113.44" } }
+      )
+    );
+
+    const json = await res.json();
+    expect(json).toMatchObject({
+      code: 200,
+      platform: "redbook",
+      data: { type: "image", title: "测试笔记", author: "测试作者" },
+    });
+  });
+
+  it("supports POST with JSON body { text } for long share text", async () => {
+    const shareText =
+      "【测试笔记】复制打开小红书，看看 https://www.xiaohongshu.com/explore/65f0c0e5000000001203d2a3 的内容";
+    const noteId = "65f0c0e5000000001203d2a3";
+    const initialState = {
+      note: {
+        currentNoteId: noteId,
+        noteDetailMap: {
+          [noteId]: {
+            note: {
+              title: "测试笔记",
+              desc: "测试描述",
+              user: { nickName: "测试作者", userId: "u1" },
+              imageList: [
+                {
+                  urlDefault:
+                    "https://sns-webpic-qc.xhscdn.com/202401/img1.jpg",
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const pageHtml = `<html><script>window.__INITIAL_STATE__=${JSON.stringify(
+      initialState
+    )}</script></html>`;
+
+    global.fetch = vi.fn().mockResolvedValue(new Response(pageHtml));
+
+    const res = await POST(
+      new Request("http://127.0.0.1/api/parse", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "203.0.113.45",
+        },
+        body: JSON.stringify({ text: shareText }),
+      })
+    );
+
+    const json = await res.json();
+    expect(json).toMatchObject({
+      code: 200,
+      platform: "redbook",
+      data: { type: "image", title: "测试笔记", author: "测试作者" },
+    });
   });
 });
