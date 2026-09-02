@@ -14,6 +14,52 @@ const MODERN_USER_AGENT =
 
 const BILIBILI_COOKIE = process.env.BILIBILI_COOKIE || "";
 
+// —— 简易 Cookie 池 ——
+// B站按请求出口 IP + Cookie 决定是否放行：无 Cookie 的数据中心/海外出口 IP
+// 直调 api.bilibili.com 常被 WAF 拦成 HTML（<!DOCTYPE ...> 风控页）而非 JSON。
+// Node fetch 不会自动保存 Cookie，这里把各响应 set-cookie（buvid3/buvid4 等）
+// 累积进池，后续请求统一带上，作为匿名“风控通行证”。
+const cookiePool = {};
+
+function absorbSetCookies(response) {
+  try {
+    const list =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [];
+    for (const raw of list) {
+      const pair = String(raw).split(";")[0].trim();
+      const name = pair.split("=")[0]?.trim();
+      if (!name) continue;
+      cookiePool[name] = pair;
+    }
+  } catch {
+    // 忽略吸收失败，不影响主流程
+  }
+}
+
+/** 合并多段 Cookie，同名以最后传入者为准（等价浏览器“最近设置者覆盖”） */
+function buildCookieString() {
+  const parts = [];
+  for (const arg of arguments) {
+    if (!arg) continue;
+    for (const seg of String(arg).split(";")) {
+      const kv = seg.trim();
+      if (kv) parts.push(kv);
+    }
+  }
+  const map = {};
+  for (const kv of parts) {
+    const name = kv.split("=")[0];
+    if (name) map[name] = kv;
+  }
+  return Object.values(map).join("; ");
+}
+
+function pooledCookie() {
+  return Object.values(cookiePool).join("; ");
+}
+
 // B站按请求出口 IP 分配 CDN 节点：海外出口（如本服务器在新加坡）拿到 akamaized.net
 // 海外节点，大陆用户浏览器无法播放。直链签名（upsig/uparams）不绑定 host，
 // 把海外 host 归一化为国内镜像节点（bilivideo.com）即可在大陆正常播放。
@@ -115,22 +161,53 @@ async function wbiSign(params) {
   return `${queryString}&w_rid=${wRid}`;
 }
 
-async function bilibiliRequest(url, headers) {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        ...headers,
-        // 允许调用方指定 UA（如空间信息接口需现代浏览器 UA 规避风控）
-        "User-Agent": headers["User-Agent"] || BILIBILI_USER_AGENT,
-        // 允许调用方传 Cookie（如拼接 buvid3 规避风控），缺省用环境变量
-        Cookie: headers.Cookie || BILIBILI_COOKIE,
-      },
-    });
-    return await response.json();
-  } catch (error) {
-    logger.error("Error making bilibili request:", error.message);
-    return null;
+async function bilibiliRequest(url, headers = {}) {
+  // 无 Cookie 出口被 WAF 拦成 HTML 时，首次请求的 set-cookie 已吸收进池，
+  // 用池内 Cookie 自动重试一次即可放行（最多 2 次）。
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          ...headers,
+          // 允许调用方指定 UA（如空间信息接口需现代浏览器 UA 规避风控）
+          "User-Agent": headers["User-Agent"] || BILIBILI_USER_AGENT,
+          // 补齐浏览器请求特征头，降低被风控误判的概率
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+          Referer: headers.Referer || "https://www.bilibili.com/",
+          // 允许调用方传 Cookie（如拼接 buvid3 规避风控），同名以调用方为准
+          Cookie: buildCookieString(
+            pooledCookie(),
+            BILIBILI_COOKIE,
+            headers.Cookie
+          ),
+        },
+        redirect: "follow",
+      });
+      // 先把 set-cookie（buvid3 等）吸收进池，供重试与后续请求使用
+      absorbSetCookies(response);
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return await response.json();
+      }
+      // 非 JSON：多半是 WAF/风控 HTML 页。截取片段便于诊断；首次被拦时重试
+      const snippet = (await response.text()).slice(0, 200).replace(/\s+/g, " ");
+      logger.warn(
+        `bilibili ${new URL(url).pathname} got status=${response.status} ${contentType}: ${snippet}`
+      );
+      if (attempt === 1) continue;
+      return null;
+    } catch (error) {
+      logger.error(
+        `Error making bilibili request (attempt ${attempt}):`,
+        error.message
+      );
+      if (attempt === 1) continue;
+      return null;
+    }
   }
+  return null;
 }
 
 /** 获取 buvid3/buvid4（B站公开接口的风控通行证，未登录也返回），模块级缓存 */
@@ -142,10 +219,12 @@ async function getBuvid() {
       "https://api.bilibili.com/x/frontend/finger/spi",
       {}
     );
-    buvidCache = {
-      b3: spi?.data?.b_3 || "",
-      b4: spi?.data?.b_4 || "",
-    };
+    const b3 = spi?.data?.b_3 || "";
+    const b4 = spi?.data?.b_4 || "";
+    // 写入 Cookie 池，让后续所有接口请求默认携带 buvid 通行证
+    if (b3) cookiePool.buvid3 = `buvid3=${b3}`;
+    if (b4) cookiePool.buvid4 = `buvid4=${b4}`;
+    buvidCache = { b3, b4 };
   } catch {
     buvidCache = { b3: "", b4: "" };
   }
@@ -184,6 +263,10 @@ async function getBilibiliVideoInfo(url) {
     
     const headers = { "Content-Type": "application/json;charset=UTF-8" };
     
+    // 数据中心/海外出口无 Cookie 直调 view 接口常被 WAF 拦成 HTML，
+    // 先取 spi 的 buvid 写入 Cookie 池，再请求视频信息。
+    await getBuvid();
+
     // 获取视频信息
     const videoInfo = await bilibiliRequest(
       `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
@@ -257,29 +340,32 @@ async function getBilibiliVideoInfo(url) {
     
     logger.log("Successfully parsed bilibili video, pages:", bilijson.length);
     
-    // UP主主页公开统计：关注 / 粉丝 / 获赞（接口可能被风控或需登录，失败不影响主流程）
+    // UP主主页公开统计：关注 / 粉丝 / 获赞 / 简介（接口可能被风控或需登录，失败不影响主流程）
     const mid = videoInfo.data.owner.mid;
     let followingCount, followerCount, totalFavorited, upSign = "";
     try {
-      // 获赞数接口需 wbi 签名（未签名直调被风控拦截），签名失败则跳过该项
-      const signedAccQuery = await wbiSign({ mid, platform: "web" }).catch(
-        () => ""
-      );
       // 带上 buvid 通行证（部分出口 IP 无 cookie 直调会被 -352 风控拦截）
       const { b3, b4 } = await getBuvid();
       const upCookie = [BILIBILI_COOKIE, `buvid3=${b3}`, `buvid4=${b4}`]
         .filter(Boolean)
         .join("; ");
-      const [relationStat, accInfo, spaceInfo] = await Promise.allSettled([
+      // 网页端「用户卡片」接口：wbi + buvid 即可匿名返回 card.sign（UP主简介）/
+      // follower（粉丝）/ like_num（获赞），是空间页首屏数据源，对访客最宽容；
+      // 而 space/wbi/acc/info 自 2026 年起对访客普遍返回 -352，不再作为主来源。
+      const signedCardQuery = await wbiSign({ mid }).catch(() => "");
+      const cardUrl = signedCardQuery
+        ? `https://api.bilibili.com/x/web-interface/card?${signedCardQuery}`
+        : `https://api.bilibili.com/x/web-interface/card?mid=${mid}`;
+      const [relationStat, cardInfo, legacySpaceInfo] = await Promise.allSettled([
         bilibiliRequest(
           `https://api.bilibili.com/x/relation/stat?vmid=${mid}`,
           headers
         ),
-        bilibiliRequest(
-          `https://api.bilibili.com/x/space/wbi/acc/info?${signedAccQuery}`,
-          { Cookie: upCookie, "User-Agent": MODERN_USER_AGENT }
-        ),
-        // UP主空间公开信息：view 接口的 owner.sign 可能为空，用空间接口签名兜底
+        bilibiliRequest(cardUrl, {
+          Cookie: upCookie,
+          "User-Agent": MODERN_USER_AGENT,
+        }),
+        // 空间旧接口：部分出口（如家宽 IP）无需 wbi 也能返回 sign，作为简介兜底
         bilibiliRequest(
           `https://api.bilibili.com/x/space/acc/info?mid=${mid}`,
           {
@@ -293,11 +379,22 @@ async function getBilibiliVideoInfo(url) {
         followingCount = relationStat.value.data.following;
         followerCount = relationStat.value.data.follower;
       }
-      if (accInfo.status === "fulfilled" && accInfo.value?.code === 0) {
-        totalFavorited = accInfo.value.data.likes;
+      if (cardInfo.status === "fulfilled" && cardInfo.value?.code === 0) {
+        const cardData = cardInfo.value.data || {};
+        upSign = cardData.card?.sign || "";
+        totalFavorited = cardData.like_num;
+        // card 的粉丝数兜底（relation/stat 被风控时仍可展示）
+        if (followerCount == null && typeof cardData.follower === "number") {
+          followerCount = cardData.follower;
+        }
       }
-      if (spaceInfo.status === "fulfilled" && spaceInfo.value?.code === 0) {
-        upSign = spaceInfo.value.data.sign || "";
+      // legacy 空间接口返回简介时覆盖（个别出口 card 被拦但该接口可用）
+      if (
+        legacySpaceInfo.status === "fulfilled" &&
+        legacySpaceInfo.value?.code === 0 &&
+        legacySpaceInfo.value?.data?.sign
+      ) {
+        upSign = legacySpaceInfo.value.data.sign;
       }
     } catch (error) {
       logger.error("Failed to fetch up stats:", error.message);
