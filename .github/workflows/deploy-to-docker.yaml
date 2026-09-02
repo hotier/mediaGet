@@ -1,37 +1,6 @@
 name: Test, build and deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Dockerfile"
-      - ".github/workflows/deploy-to-docker.yaml"
-      - "src/**"
-      - "**/*.ts"
-      - "**/*.tsx"
-      - "public/**"
-      - "next.config.*"
-      - "tsconfig.json"
-      - "vitest.config.ts"
-      - "package.json"
-      - "package-lock.json"
-      - "tailwind.config.ts"
-      - "postcss.config.mjs"
-  pull_request:
-    paths:
-      - "Dockerfile"
-      - ".github/workflows/deploy-to-docker.yaml"
-      - "src/**"
-      - "**/*.ts"
-      - "**/*.tsx"
-      - "public/**"
-      - "next.config.*"
-      - "tsconfig.json"
-      - "vitest.config.ts"
-      - "package.json"
-      - "package-lock.json"
-      - "tailwind.config.ts"
-      - "postcss.config.mjs"
   workflow_dispatch:
 
 permissions:
