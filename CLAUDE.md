@@ -57,7 +57,7 @@ The proxy route (`/api/proxy/route.ts`) forwards media requests with appropriate
 Configure in `.env` for full functionality:
 
 - `DOUYIN_COOKIE`, `DOUYIN_USER_AGENT` — Douyin parsing
-- `BILIBILI_COOKIE` — Bilibili parsing
+- `BILIBILI_COOKIE` — Bilibili parsing（建议配置：浏览器登录态完整 Cookie，必含 SESSDATA；规避数据中心出口的 -412/-352 风控。含失效自检：连续 5 次风控日志告警「BILIBILI_COOKIE 疑似失效」，成功自动复位，获取步骤见 `API.md`）
 - `XHS_COOKIE` — Xiaohongshu parsing（数据中心/海外出口被风控时强烈建议配置）
 - `WEIBO_COOKIE` — Weibo parsing
 - `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` — Turso (libsql) database for parse analytics; when unset, analytics is silently disabled

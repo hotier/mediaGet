@@ -2,6 +2,11 @@ import { createApiHandler } from "@/lib/api-middleware";
 import { logger } from "@/lib/api-utils";
 import crypto from "crypto";
 import { classifyOpusDetail } from "@/lib/bilibili-opus";
+import {
+  classifyBiliFailure,
+  createBiliCookieGuard,
+  createBiliHealthProbe,
+} from "@/lib/bilibili-cookie-guard";
 
 export const runtime = "nodejs";
 
@@ -211,6 +216,30 @@ async function bilibiliRequest(url, headers = {}) {
   return null;
 }
 
+// —— BILIBILI_COOKIE 失效自检 ——
+// 登录 Cookie 会过期（数月至一年）。配置后若连续命中风控 / nav 探测 isLogin=false，
+// 判定失效并告警（只告警一次，任一次成功解析后自动复位），提醒维护者低频更新即可。
+// 判定与状态机逻辑抽在 lib/bilibili-cookie-guard（纯逻辑，可单测）。
+const hasBiliCookie = Boolean(
+  BILIBILI_COOKIE && /SESSDATA=[^;]+/.test(BILIBILI_COOKIE)
+);
+
+const biliCookieGuard = createBiliCookieGuard({
+  threshold: 5,
+  warn: (streak) =>
+    logger.warn(
+      `[bilibili] BILIBILI_COOKIE 疑似失效：连续 ${streak} 次带 Cookie 请求仍被 B 站风控拦截。` +
+        `请登录 bilibili.com（勾选「记住我」延长有效期），复制含 SESSDATA 的完整 Cookie ` +
+        `更新环境变量 BILIBILI_COOKIE 后重新部署`
+    ),
+});
+
+// 显式健康探测：nav 接口的 data.isLogin 精确反映 SESSDATA 是否仍有效（TTL 内缓存）
+const probeBiliCookieHealth = createBiliHealthProbe({
+  fetchNav: () =>
+    bilibiliRequest("https://api.bilibili.com/x/web-interface/nav", {}),
+});
+
 /** 获取 buvid3/buvid4（B站公开接口的风控通行证，未登录也返回），模块级缓存 */
 let buvidCache = null;
 async function getBuvid() {
@@ -283,7 +312,30 @@ async function getBilibiliVideoInfo(url) {
     
     if (!videoInfo || videoInfo.code !== 0) {
       logger.warn("Failed to fetch video info, response:", videoInfo);
-      return { code: 0, msg: "解析失败！" };
+      // 按原因分级提示：区分「服务器没配 Cookie / Cookie 失效 / 视频不存在 /
+      // 其它失败」，让访问者知道该稍后重试还是联系站长，站长能一眼定位该换 Cookie
+      const failure = classifyBiliFailure({
+        cookieConfigured: hasBiliCookie,
+        jsonCode: videoInfo ? videoInfo.code : null,
+      });
+      let msg = failure.msg;
+      if (failure.cookieStale) {
+        // 已配 Cookie 仍被风控：用 nav 的 isLogin 精确判定是否 Cookie 已过期，
+        // 能确认失效时给出明确提示并告警一次（而非含糊的「请稍后重试」）
+        const health = await probeBiliCookieHealth();
+        if (health && health.ok === false) {
+          msg = "B站解析失败：服务器 Cookie 已失效，请稍后重试";
+          logger.warn(
+            "[bilibili] BILIBILI_COOKIE 已失效（nav isLogin=false）：请登录 bilibili.com（勾选「记住我」）复制含 SESSDATA 的完整 Cookie 更新环境变量 BILIBILI_COOKIE"
+          );
+        }
+        biliCookieGuard.note({
+          configured: hasBiliCookie,
+          succeeded: false,
+          challenged: true,
+        });
+      }
+      return { code: 0, msg };
     }
     
     // 并行获取所有分P的播放地址（含各清晰度直链）
@@ -347,7 +399,14 @@ async function getBilibiliVideoInfo(url) {
     const bilijson = (await Promise.all(playUrlPromises)).filter(Boolean);
     
     logger.log("Successfully parsed bilibili video, pages:", bilijson.length);
-    
+
+    // 带 Cookie 解析成功 → 出口可用，复位失效告警计数（见 biliCookieGuard）
+    biliCookieGuard.note({
+      configured: hasBiliCookie,
+      succeeded: true,
+      challenged: false,
+    });
+
     // UP主主页公开统计：关注 / 粉丝 / 获赞 / 简介（接口可能被风控或需登录，失败不影响主流程）
     const mid = videoInfo.data.owner.mid;
     const upStats = await fetchBilibiliUpStats(mid);
@@ -470,6 +529,14 @@ async function parseBilibiliOpus(url, opusId) {
     );
     if (!detail || detail.code !== 0 || !detail.data?.item) {
       logger.warn("Failed to fetch opus detail, response:", detail);
+      // 非 JSON（WAF 拦截）且带 Cookie → 记入连续失败，辅助 Cookie 失效自检
+      if (!detail) {
+        biliCookieGuard.note({
+          configured: hasBiliCookie,
+          succeeded: false,
+          challenged: true,
+        });
+      }
       return { code: 0, msg: "解析失败！" };
     }
     const outcome = classifyOpusDetail(detail);
@@ -484,6 +551,12 @@ async function parseBilibiliOpus(url, opusId) {
     data.followerCount = upStats.followerCount;
     data.totalFavorited = upStats.totalFavorited;
     logger.log(`Successfully parsed bilibili opus ${opusId}, images: ${data.images.length}`);
+    // 带 Cookie 解析成功 → 复位失效告警计数（图文与视频共享同一出口状态）
+    biliCookieGuard.note({
+      configured: hasBiliCookie,
+      succeeded: true,
+      challenged: false,
+    });
     return { code: 200, msg: "解析成功！", data };
   } catch (error) {
     logger.error("Error parsing bilibili opus:", error.message);

@@ -506,6 +506,15 @@ DOUYIN_COOKIE=your_cookie
 DOUYIN_USER_AGENT=your_user_agent
 
 # 哔哩哔哩
+# BILIBILI_COOKIE 强烈建议配置：服务器为数据中心/海外出口时，匿名请求会被 B 站 WAF
+# 风控（-412/-352，表现为解析失败）。填入浏览器登录态的完整 Cookie（必含 SESSDATA）
+# 即可穿透，且登录态下 B 站基本不拦数据中心 IP。
+# 获取：浏览器登录 bilibili.com（务必勾选「记住我」，有效期可达一年以上，到期才需
+# 再配一次）→ F12 → Application → Cookies → https://www.bilibili.com →
+# 复制全部 Cookie 字符串作为该环境变量值。
+# 失效自检（低维护）：Cookie 过期后服务会自动降级并告警——连续 5 次带 Cookie 请求
+# 仍被风控时日志打出「BILIBILI_COOKIE 疑似失效」，任一次成功解析自动复位；解析失败
+# 的提示文案也会区分「服务器 Cookie 失效」与「临时风控」，便于定位是换 Cookie 还是重试。
 BILIBILI_COOKIE=your_cookie
 BILIBILI_USER_AGENT=your_user_agent
 
