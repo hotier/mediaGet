@@ -1,6 +1,7 @@
 import { createApiHandler } from "@/lib/api-middleware";
 import { logger } from "@/lib/api-utils";
 import crypto from "crypto";
+import { classifyOpusDetail } from "@/lib/bilibili-opus";
 
 export const runtime = "nodejs";
 
@@ -250,6 +251,13 @@ async function getBilibiliVideoInfo(url) {
       return { code: -1, msg: "视频链接好像不太对！" };
     }
     
+    // 图文动态（/opus/<id>）：先于视频校验分流；非纯图文类型（专栏文章/视频动态等）
+    // 由 classifyOpusDetail 给出针对性提示
+    const opusMatch = bvid.match(/\/(?:opus|dynamic)\/(\d+)/);
+    if (opusMatch) {
+      return parseBilibiliOpus(url, opusMatch[1]);
+    }
+
     if (!bvid.includes("/video/")) {
       return { code: -1, msg: "好像不是视频链接" };
     }
@@ -427,6 +435,38 @@ async function getBilibiliVideoInfo(url) {
     };
   } catch (error) {
     logger.error("Error parsing bilibili video:", error.message);
+    return { code: 0, msg: "解析失败！" };
+  }
+}
+
+/**
+ * 图文动态（/opus/<id>）解析：detail 接口无 cookie 即可访问（带上 buvid 通行证更稳）。
+ * 纯图文返回统一契约 { code:200, data:{ type:"image", ... } }，
+ * 走 normalizeResult 通用分支透传（不新增特例）；非纯图文返回 code:0 + 明确 msg。
+ */
+async function parseBilibiliOpus(url, opusId) {
+  try {
+    // 数据中心/海外出口无 Cookie 直调会被 WAF 拦成 HTML，先取 buvid 写入 Cookie 池
+    await getBuvid();
+    // detail 接口对旧 UA 会被风控拦截（-352），与现代浏览器 UA 放行（与下方空间接口同源）
+    const headers = {
+      "Content-Type": "application/json;charset=UTF-8",
+      "User-Agent": MODERN_USER_AGENT,
+    };
+    const detail = await bilibiliRequest(
+      `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=${opusId}&features=itemOpusStyle`,
+      headers
+    );
+    if (!detail || detail.code !== 0 || !detail.data?.item) {
+      logger.warn("Failed to fetch opus detail, response:", detail);
+      return { code: 0, msg: "解析失败！" };
+    }
+    const outcome = classifyOpusDetail(detail);
+    if (!outcome.ok) return { code: 0, msg: outcome.msg };
+    logger.log(`Successfully parsed bilibili opus ${opusId}, images: ${outcome.data.images.length}`);
+    return { code: 200, msg: "解析成功！", data: outcome.data };
+  } catch (error) {
+    logger.error("Error parsing bilibili opus:", error.message);
     return { code: 0, msg: "解析失败！" };
   }
 }
