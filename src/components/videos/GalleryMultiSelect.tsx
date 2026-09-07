@@ -180,17 +180,19 @@ export function GalleryDownloadBar({
     }
   };
 
-  // 主下载按钮在左（5/6），多选切换按钮在右（1/6）：
+  // 移动端两行布局：主下载按钮独占第一行，多选切换按钮在第二行——
+  // 若后续在第二行追加第三个按钮，则与它 5:5 平分；没有第三按钮时占满第二行整行。
+  // 桌面端保持单行：主下载按钮在左（5/6），多选切换按钮在右（1/6）。
   // 默认态 =「一键下载全部 + 多选」；点击多选后原位切换为
   // 「下载选中图片（实时显示已选张数）+ 取消多选」
   return (
-    <div className="mt-3 flex items-stretch gap-2">
+    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
       <Button
         type="button"
         size="lg"
         onClick={selecting ? handleDownloadSelected : handleDownloadAll}
         disabled={downloading || (selecting && selected.length === 0)}
-        className={`flex-[5] ${gradient}`}>
+        className={`w-full sm:w-auto sm:flex-[5] ${gradient}`}>
         {downloading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -222,7 +224,7 @@ export function GalleryDownloadBar({
           disabled={downloading}
           aria-label={selecting ? "取消多选" : "多选"}
           title={selecting ? "取消多选" : "多选"}
-          className="flex-1 whitespace-nowrap px-0">
+          className="w-full whitespace-nowrap sm:w-auto sm:flex-1 sm:px-0">
           {selecting ? (
             <>
               <X className="h-5 w-5" />

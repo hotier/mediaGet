@@ -57,6 +57,11 @@ export function textModeResponse(result: Record<string, unknown>): string {
     (typeof videos[0]?.url === "string" && videos[0].url) ||
     (typeof images[0] === "string" && images[0]) ||
     "";
+  // YouTube 官方嵌入降级结果（embedOnly=true，无直链可给）：纯文本调用方（iOS 快捷
+  // 指令等）拿不到下载直链，此时按失败提示输出一行文本，避免输出空直链行。
+  if (d.embedOnly === true && !url) {
+    return String(result.msg ?? "解析失败");
+  }
   return [title, url].join("\n");
 }
 
@@ -373,13 +378,18 @@ export const createApiHandler = (
       // 只缓存成功结果（code===200）。失败多为瞬时（上游风控/解析源波动），
       // 若也写入缓存会把失败粘住 24h（共享缓存）/数分钟（内存），用户重试永远
       // 命中失败。失败下次请求自动重新解析；同链接内存 5 分钟内也不重复写失败。
-      if (shouldCache && result?.code === 200) {
+      // YouTube embedOnly（官方嵌入降级、无下载直链）同样不缓存：直链解析源多为
+      // 瞬时波动，一旦恢复，重试应立即拿到带直链的正常结果，而不是被降级态粘住。
+      const resultData = (result?.data ?? {}) as Record<string, unknown>;
+      const embedOnlyDegrade =
+        resultData.embedOnly === true && !resultData.url;
+      if (shouldCache && result?.code === 200 && !embedOnlyDegrade) {
         setCacheResponse(sanitizedUrl, result);
       }
 
       // 共享结果缓存：写入最终归一化成功结果（含 platform），好友/他人再打开同一
       // 分享链接时 24h 内直接命中，不再全量重新解析
-      if (sharedCache && result?.code === 200) {
+      if (sharedCache && result?.code === 200 && !embedOnlyDegrade) {
         await putResultCache(sanitizedUrl, result);
       }
 

@@ -105,7 +105,7 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
                   <span className="flex-shrink-0">简介：</span>
                   <TruncatedText
                     text={douyinData.sign}
-                    className="min-w-0 line-clamp-2"
+                    className="min-w-0 truncate"
                   />
                 </p>
               )}

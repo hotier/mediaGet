@@ -279,6 +279,31 @@ const PLATFORM_FIELDS: Record<string, FieldDef[]> = {
     { key: "views", label: "查看", format: formatCount },
     TYPE_FIELD,
   ],
+  // 频道卡已展示：频道名（可点主页）/ @频道号 / 订阅等统计；视频简介走 CaptionBox。
+  // 视频ID 属作品信息，归入本面板展示；其余与 B站布局一致，只保留视频相关统计
+  // （富字段仅在直链源成功时下发；oEmbed 降级/旧缓存缺失时按「无值」自动隐藏）
+  youtube: [
+    { key: "title", label: "视频标题" },
+    { key: "time", label: "发布时间", format: formatTime },
+    { key: "duration", label: "视频时长", format: formatDuration },
+    { key: "views", label: "播放", format: formatCount },
+    { key: "like", label: "点赞", format: formatCount },
+    {
+      key: "type",
+      label: "内容类型",
+      format: () => "视频",
+    },
+    {
+      // 视频ID 正常来自 data.videoId；旧数据仅带 embedUrl 时从官方嵌入地址兜底提取
+      key: "videoId",
+      label: "视频ID",
+      format: (v, d) => {
+        if (v !== undefined && v !== null && v !== "") return String(v);
+        const m = /(?:embed|v=)\/?([\w-]{6,})/.exec(d.embedUrl || "");
+        return m ? m[1] : undefined;
+      },
+    },
+  ],
 };
 
 /** 未配置平台时的默认字段集 */

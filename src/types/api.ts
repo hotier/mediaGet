@@ -76,6 +76,30 @@ export interface ParseData {
   /** 多分P / 多清晰度列表（bilibili） */
   videos?: ParsedVideoItem[];
 
+  // —— 官方嵌入（YouTube 等） ——
+  /** 平台视频 ID（YouTube 等；供前端构造官方嵌入 / 原始页面链接） */
+  videoId?: string;
+  /** 官方可嵌入播放地址（仅平台支持 iframe 嵌入时下发，如 YouTube 的 youtube-nocookie.com/embed/{id}，无需 API Key） */
+  embedUrl?: string;
+  /** 降级标记：直链解析源不可用、仅官方嵌入可用的成功结果（无 url/audioUrl，后端不写缓存，解析源恢复后重试即可拿直链） */
+  embedOnly?: boolean;
+  /** 最佳直链清晰度展示（如 "1080p"；YouTube 直链来源解析不出清晰度时省略） */
+  qualityLabel?: string;
+  /**
+   * 可下载清晰度档位列表（B站 videos[].qualities 的平台级对齐字段）：
+   * ≥2 档时前端在下载选项行渲染 B站同款行内清晰度下拉，单档仍由 qualityLabel 徽标展示。
+   * YouTube 只下发「合流（含音轨）」的可直接下载档位，分离流（无声视频）不入列。
+   */
+  qualities?: ParsedVideoQuality[];
+
+  // —— 富信息扩展（YouTube 与 B站对齐） ——
+  /** 频道订阅者数（数字；0 / 缺失表示直链源未提供，前端据此隐藏徽标） */
+  subscriberCount?: number;
+  /** 频道投稿数（YouTube；仅官方 v3 配置时下发，0 / 缺失按无值隐藏。与 B站「分P数量」的 info-panel 特殊键 videoCount 无关，那是读 videos.length） */
+  videoCount?: number;
+  /** 频道累计播放（YouTube；仅官方 v3 配置时下发，0 / 缺失按无值隐藏） */
+  channelViews?: number;
+
   // —— 音乐扩展（汽水音乐等） ——
   name?: string;
   lyrics?: string;

@@ -57,7 +57,11 @@ export default function GenericParsedVideo({
               />
             )}
             {d.author && (
-              <p className="text-sm text-muted">{d.author}</p>
+              <TruncatedText
+                as="p"
+                text={d.author}
+                className="text-sm text-muted truncate"
+              />
             )}
           </div>
         </div>

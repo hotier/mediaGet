@@ -234,8 +234,10 @@ export default function VideoPosterCard({
         </div>
       )}
 
-      {/* 操作按钮：播放 / 下载（内嵌模式下封面或播放按钮均可触发当前页内嵌播放） */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* 操作按钮：播放 / 下载（内嵌模式下封面或播放按钮均可触发当前页内嵌播放）
+          移动端两行布局：播放独占第一行，下载视频/音频在第二行 5:5 平分（无音频时下载占满整行）；
+          桌面端 sm:contents 让内层失效，三个按钮保持单行等宽 */}
+      <div className="flex flex-col gap-3 sm:flex-row">
         {showPlay &&
           (inline ? (
             <Button
@@ -243,7 +245,7 @@ export default function VideoPosterCard({
               variant="default"
               size="lg"
               onClick={handleInlinePlay}
-              className={`flex-1 bg-gradient-to-r ${gradient} hover:opacity-90`}>
+              className={`sm:flex-1 bg-gradient-to-r ${gradient} hover:opacity-90`}>
               {playing ? (
                 <Pause className="h-5 w-5" />
               ) : (
@@ -256,7 +258,7 @@ export default function VideoPosterCard({
               asChild
               variant="default"
               size="lg"
-              className={`flex-1 bg-gradient-to-r ${gradient} hover:opacity-90`}>
+              className={`sm:flex-1 bg-gradient-to-r ${gradient} hover:opacity-90`}>
               <a href={playUrl} target="_blank" rel="noopener noreferrer">
                 <Play className="h-5 w-5" />
                 {playText}
@@ -264,47 +266,49 @@ export default function VideoPosterCard({
             </Button>
           ))}
 
+        {/* 第二行：下载视频 + 音频下载，移动端 5:5 平分（无音频时下载占满）；桌面端 contents 并入单行 */}
+        <div className="flex gap-3 sm:contents">
         {showDownload &&
-          (onDownloadClick ? (
-            /* 自定义下载行为（如滚动定位到下载区），不直接下载 */
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              className="flex-1"
-              onClick={() => onDownloadClick(partIndex)}>
+        (onDownloadClick ? (
+          /* 自定义下载行为（如滚动定位到下载区），不直接下载 */
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="flex-1"
+            onClick={() => onDownloadClick(partIndex)}>
+            <Download className="h-5 w-5" />
+            {downloadText}
+          </Button>
+        ) : inline && !playUrl.startsWith("/api/video-proxy") ? (
+          /* 内嵌模式 + 直链跨域：download 属性对跨域 URL 无效，走代理强制保存文件（抖音等） */
+          <Button asChild variant="outline" size="lg" className="flex-1">
+            <a
+              href={`/api/video-proxy?url=${encodeURIComponent(
+                currentUrl
+              )}&download=1&filename=${encodeURIComponent(downloadName)}`}
+              target="_blank"
+              rel="noopener noreferrer">
               <Download className="h-5 w-5" />
               {downloadText}
-            </Button>
-          ) : inline && !playUrl.startsWith("/api/video-proxy") ? (
-            /* 内嵌模式 + 直链跨域：download 属性对跨域 URL 无效，走代理强制保存文件（抖音等） */
-            <Button asChild variant="outline" size="lg" className="flex-1">
-              <a
-                href={`/api/video-proxy?url=${encodeURIComponent(
-                  currentUrl
-                )}&download=1&filename=${encodeURIComponent(downloadName)}`}
-                target="_blank"
-                rel="noopener noreferrer">
-                <Download className="h-5 w-5" />
-                {downloadText}
-              </a>
-            </Button>
-          ) : (
-            <Button asChild variant="outline" size="lg" className="flex-1">
-              <a
-                href={playUrl}
-                target={inline ? undefined : "_blank"}
-                rel={inline ? undefined : "noopener noreferrer"}
-                download={inline ? downloadName : undefined}>
-                <Download className="h-5 w-5" />
-                {downloadText}
-              </a>
-            </Button>
-          ))}
+            </a>
+          </Button>
+        ) : (
+          <Button asChild variant="outline" size="lg" className="flex-1">
+            <a
+              href={playUrl}
+              target={inline ? undefined : "_blank"}
+              rel={inline ? undefined : "noopener noreferrer"}
+              download={inline ? downloadName : undefined}>
+              <Download className="h-5 w-5" />
+              {downloadText}
+            </a>
+          </Button>
+        ))}
 
         {/* 音频下载：与视频下载同款式（中性描边），点击新窗口打开音频直链 */}
         {audioUrl && (
-          <Button asChild variant="outline" size="lg" className="flex-1">
+        <Button asChild variant="outline" size="lg" className="flex-1">
             <a
               href={audioUrl}
               target="_blank"
@@ -314,6 +318,7 @@ export default function VideoPosterCard({
             </a>
           </Button>
         )}
+        </div>
       </div>
     </div>
   );

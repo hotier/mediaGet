@@ -517,7 +517,7 @@ export default function VideoParserForm({
                 {platform === "auto" ? (
                   <>
                     <ScanSearch className="h-4 w-4 shrink-0 text-accent" />
-                    <span className="truncate">自动识别（粘贴即解析）</span>
+                    <span className="truncate">自动识别</span>
                   </>
                 ) : (
                   <>

@@ -13,6 +13,7 @@ import {
   SelectableImageLink,
   useGallerySelection,
 } from "./GalleryMultiSelect";
+import DownloadRow from "./DownloadRow";
 import PlatformIcon from "@/components/PlatformIcon";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -146,7 +147,7 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
                   <span className="flex-shrink-0">简介：</span>
                   <TruncatedText
                     text={d.sign}
-                    className="min-w-0 line-clamp-2"
+                    className="min-w-0 truncate"
                   />
                 </p>
               )}
@@ -316,55 +317,23 @@ export default function TwitterVideo({ data }: TwitterVideoProps) {
 
           <div className="space-y-3">
             {videos.map((item, index) => (
-              <div
+              <DownloadRow
                 key={index}
                 id={`twitter-download-${index}`}
-                className="flex items-center gap-3 rounded-xl bg-glass-2 hover:bg-glass-3 transition-colors duration-200 px-4 py-3 scroll-mt-24">
-                {item.cover && (
-                  <Image
-                    src={item.cover}
-                    alt={item.title || `视频 ${index + 1}`}
-                    width={120}
-                    height={75}
-                    className="w-[120px] h-[75px] rounded-lg object-cover flex-shrink-0 border border-glass-3"
-                    unoptimized
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <TruncatedText
-                    as="p"
-                    text={`P${index + 1}: ${item.title || d.title || "视频"}`}
-                    className="text-sm font-medium text-primary truncate"
-                  />
-                  {item.durationFormat && (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs text-muted">
-                        {item.durationFormat}
-                      </span>
-                      <span className="rounded-md bg-glass-2 px-1.5 py-0.5 text-[11px] text-accent">
-                        MP4
-                      </span>
-                    </div>
-                  )}
-                </div>
-                {/* 下载按钮固定在行右侧，随分P紧凑排列 */}
-                <Button
-                  asChild
-                  size="sm"
-                  className="flex-shrink-0 bg-gradient-to-r from-[#14171a] to-[#657786] hover:opacity-90">
-                  <a
-                    href={`/api/video-proxy?url=${encodeURIComponent(
-                      item.url
-                    )}&download=1&filename=${encodeURIComponent(
-                      buildDownloadName(index)
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer">
-                    <Download className="h-4 w-4" />
-                    下载
-                  </a>
-                </Button>
-              </div>
+                cover={item.cover}
+                coverAlt={item.title || `视频 ${index + 1}`}
+                title={`P${index + 1}: ${item.title || d.title || "视频"}`}
+                durationText={item.durationFormat}
+                badge="MP4"
+                href={item.url}
+                buildHref={(url) =>
+                  `/api/video-proxy?url=${encodeURIComponent(
+                    url
+                  )}&download=1&filename=${encodeURIComponent(
+                    buildDownloadName(index)
+                  )}`}
+                gradient="from-[#14171a] to-[#657786]"
+              />
             ))}
           </div>
         </Card>

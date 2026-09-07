@@ -12,6 +12,7 @@ import {
   PipigxVideo,
   PpxiaVideo,
   TwitterVideo,
+  YouTubeVideo,
   GenericParsedVideo,
 } from "./index";
 
@@ -42,6 +43,7 @@ export const platformRenderers: Partial<
   pipigx: PipigxVideo,
   ppxia: PpxiaVideo,
   twitter: TwitterVideo,
+  youtube: YouTubeVideo,
 };
 
 /** 按平台选择渲染组件；未注册的平台一律走通用渲染 */

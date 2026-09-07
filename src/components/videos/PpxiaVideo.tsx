@@ -6,6 +6,7 @@ import VideoPosterCard from "./VideoPosterCard";
 import ParseInfoPanel from "./ParseInfoPanel";
 import CaptionBox from "./CaptionBox";
 import { Card } from "@/components/ui/card";
+import TruncatedText from "@/components/ui/truncated-text";
 
 interface PpxiaVideoProps {
   data: ApiResponse;
@@ -35,7 +36,13 @@ export default function PpxiaVideo({ data }: PpxiaVideoProps) {
               />
             )}
             {ppxiaData.author && (
-              <p className="text-secondary text-left">{ppxiaData.author}</p>
+              <div className="flex-1 min-w-0">
+                <TruncatedText
+                  as="p"
+                  text={ppxiaData.author}
+                  className="text-secondary text-left truncate"
+                />
+              </div>
             )}
           </div>
         </Card>

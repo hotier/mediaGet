@@ -314,8 +314,10 @@ export default function Home() {
             {/* Results Section */}
             {result && (result.code === 1 || result.code === 200) && (
               <div className={cn("mt-6", enterAnimated && "reveal")}>
-                <Card className="overflow-hidden">
-                  <CardHeader className="flex flex-row items-center justify-between border-b border-border-subtle bg-glass-2">
+                {/* 不加 overflow-hidden：会裁掉下载选项卡里弹出的清晰度下拉菜单；
+                    头部玻璃底色用 rounded-t-2xl 自行贴合卡片圆角 */}
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between rounded-t-2xl border-b border-border-subtle bg-glass-2">
                     <Badge variant="success">
                       <Check />
                       解析成功

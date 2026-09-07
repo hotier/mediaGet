@@ -7,4 +7,5 @@ export { default as QsMusicVideo } from "./QsMusicVideo";
 export { default as PipigxVideo } from "./PipigxVideo";
 export { default as PpxiaVideo } from "./PpxiaVideo";
 export { default as TwitterVideo } from "./TwitterVideo";
+export { default as YouTubeVideo } from "./YouTubeVideo";
 export { default as GenericParsedVideo } from "./GenericParsedVideo";

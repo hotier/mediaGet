@@ -10,10 +10,13 @@
  * 播放/下载统一走代理（服务端带 Referer: weibo.com）。
  * X/Twitter 的 video.twimg.com 恰好相反：非 x.com 来源页的 Referer 会被 403
  * 拒绝（浏览器直链播放必带页面 Referer），必须走代理（服务端不带 Referer 转发）。
+ * YouTube 媒体域（googlevideo / Piped 实例的 pipedproxy 代理域）没有 Referer
+ * 防盗链，但国内网络直连被墙 —— 统一走服务端转发（海外部署可达上游），保证
+ * YouTube「直链播放」兜底与下载在全网络环境下可用。
  * 其他平台（B站/快手等）直链通常可正常播放，无需代理。
  */
 
-/** 需要走代理的 CDN 主机（Referer 防盗链） */
+/** 需要走代理的 CDN 主机（Referer 防盗链 / 网络不可达） */
 const PROXY_HOST_SUFFIXES = [
   ".xhscdn.com",
   "xhscdn.com",
@@ -29,12 +32,18 @@ const PROXY_HOST_SUFFIXES = [
   "weibocdn.com",
   ".twimg.com",
   "twimg.com",
+  // YouTube 媒体域（无防盗链，因网络可达性走代理）
+  ".googlevideo.com",
+  "googlevideo.com",
 ];
 
 /** 判断视频 URL 是否需要走代理 */
 export function needsVideoProxy(url: string): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
+    // Piped 实例的流媒体代理域子域形态不固定（pipedproxy.xxx / pipedproxy-xxx.xxx），
+    // 用包含判断；与 googlevideo 同因（网络可达性）走服务端转发
+    if (hostname.includes("pipedproxy")) return true;
     return PROXY_HOST_SUFFIXES.some((s) => hostname === s || hostname.endsWith(s));
   } catch {
     return false;
