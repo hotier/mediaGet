@@ -119,7 +119,7 @@ export default function BilibiliVideo({ data }: BilibiliVideoProps) {
             <div className="flex-1 min-w-0">
               {parsed?.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] text-secondary">UP主</span>
+                  <span className="flex-shrink-0 text-[13px] text-secondary">UP主</span>
                   {parsed.authorUrl ? (
                     <TruncatedText
                       as="a"

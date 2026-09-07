@@ -78,11 +78,20 @@ export default function CollapsibleGallery({
       <div
         ref={ref}
         className="relative overflow-hidden transition-[max-height] duration-300 ease-in-out"
-        style={{ maxHeight }}>
+        style={{
+          maxHeight,
+          // 折叠态底部渐隐用 mask-image 对图片本身做透明度过渡（同 CaptionBox）：
+          // 固定遮罩色（from-glass-1）在暗色主题下与玻璃卡片实际合成底色对不上
+          ...(overflow && !expanded && foldHeight
+            ? {
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, black calc(100% - 64px), transparent 100%)",
+                maskImage:
+                  "linear-gradient(to bottom, black calc(100% - 64px), transparent 100%)",
+              }
+            : {}),
+        }}>
         {children}
-        {overflow && !expanded && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-glass-1 to-transparent" />
-        )}
       </div>
 
       {/* 图片行数超过折叠行数时展示展开/收起入口 */}

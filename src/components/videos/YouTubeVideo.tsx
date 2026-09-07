@@ -555,7 +555,7 @@ export default function YouTubeVideo({ data }: { data: ApiResponse }) {
             <div className="flex-1 min-w-0">
               {d.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] text-secondary">频道</span>
+                  <span className="flex-shrink-0 text-[13px] text-secondary">频道</span>
                   {channelHref ? (
                     <TruncatedText
                       as="a"

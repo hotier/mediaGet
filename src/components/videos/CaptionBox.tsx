@@ -93,17 +93,27 @@ export default function CaptionBox({ text, title = "文案" }: CaptionBoxProps) 
         </Button>
       </div>
 
-      {/* 折叠内容：限高 + 底部渐变；展开/收起在精确高度间过渡（无死区、无弹跳） */}
+      {/* 折叠内容：限高 + 底部渐隐；展开/收起在精确高度间过渡（无死区、无弹跳）。
+          底部提示用 mask-image 对文字本身做渐隐，而非叠加半透明色带：卡片底色是
+          玻璃层半透明叠加，任何固定遮罩色（from-glass-1）在暗色主题下都会与实际
+          合成底色对不上、形成一条更深的色带；渐隐让真实底色透出，亮/暗主题一致 */}
       <div
         ref={contentRef}
         className="relative overflow-hidden transition-[max-height] duration-300 ease-in-out"
-        style={{ maxHeight: expanded ? contentHeight : COLLAPSED_HEIGHT }}>
+        style={{
+          maxHeight: expanded ? contentHeight : COLLAPSED_HEIGHT,
+          ...(overflow && !expanded
+            ? {
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, black 80px, transparent 128px)",
+                maskImage:
+                  "linear-gradient(to bottom, black 80px, transparent 128px)",
+              }
+            : {}),
+        }}>
         <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-muted">
           {text}
         </p>
-        {overflow && !expanded && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-glass-1 to-transparent" />
-        )}
       </div>
 
       {/* 内容超出时展示展开/收起入口 */}

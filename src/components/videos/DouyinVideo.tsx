@@ -75,7 +75,7 @@ export default function DouyinVideo({ data }: DouyinVideoProps) {
             <div className="flex-1 min-w-0">
               {douyinData.author && (
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] text-secondary">博主</span>
+                  <span className="flex-shrink-0 text-[13px] text-secondary">博主</span>
                   {douyinData.authorUrl ? (
                     <TruncatedText
                       as="a"

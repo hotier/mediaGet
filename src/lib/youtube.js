@@ -18,8 +18,10 @@
  *     自托管 Piped/Invidious 时把它加进环境变量即可稳定解析。
  *   - 官方元数据增强（可选）：配置 YOUTUBE_API_KEY 后，YouTube Data API v3 作为
  *     「优先元数据源」——标题/简介/频道真实头像/播放/点赞/发布时间/订阅以官方为准
- *     （v3 权威稳定，不随公共实例波动）；直链下载仍由 Piped/Invidious 竞速提供，
- *     官方源不可用/超时时静默回退 oEmbed 兜底，行为与未配置时完全一致。
+ *     （v3 权威稳定，不随公共实例波动）；直链下载仍由 Piped/Invidious 竞速提供。
+ *     竞速成功路径 v3 单次等待（失败回退直链源字段，不拖慢首屏）；降级（embedOnly）
+ *     路径 v3 失败自动重试一次并记 warn 日志，仍失败才回退 oEmbed 兜底（其只有
+ *     标题/频道名/封面，作者详情会缺失），行为与未配置时保持一致。
  *
  * 在线播放稳定性（2026-09 增强）：官方 embed 不依赖任何第三方解析源——成功结果
  * 始终附带 videoId 与 embedUrl（youtube-nocookie.com/embed/{id}，无需 API Key）；
@@ -621,9 +623,11 @@ export function normalizeV3Channel(payload, meta) {
     next.authorId = handle;
     next.authorUrl = `https://www.youtube.com/@${handle}`;
   }
-  // 频道简介（个人签名，与 B 站 UP 主 sign 对齐）；超长截断，控制下发体积
+  // 频道简介（个人签名，与 B 站 UP 主 sign 对齐）。部分频道（尤其实用类/声明类）
+  // 简介超过千字，截太短会丢免责声明等重要内容 —— 与视频简介 desc 同用 5000 上限，
+  // 前端 TruncatedText/line-clamp 负责展示与滚动阅读
   const channelDesc = String(snippet.description || "").trim();
-  if (channelDesc) next.sign = channelDesc.slice(0, 500);
+  if (channelDesc) next.sign = channelDesc.slice(0, 5000);
   // 投稿数 / 频道累计播放（官方统计）
   const videoCount = v3Num(statistics.videoCount);
   if (videoCount !== undefined) next.videoCount = videoCount;
@@ -632,12 +636,10 @@ export function normalizeV3Channel(payload, meta) {
   return next;
 }
 
-/**
- * 拉取官方 v3 元数据（videos.list + channels.list，共享整体超时预算）。
- * 任意失败返回 { ok:false, official:true, status }，绝不 throw —— 供调用方静默
- * 回退到「直链源解析 + oEmbed 兜底」，不让官方源可用性影响主链路。
- */
-export async function fetchOfficialMeta(id) {
+/** 单次拉取官方 v3 元数据（videos.list + channels.list，共享一次整体超时预算）。
+ *  任意失败返回 { ok:false, official:true, status }，绝不 throw —— 供调用方静默
+ *  回退到「直链源解析 + oEmbed 兜底」，不让官方源可用性影响主链路。 */
+async function fetchOfficialMetaOnce(id) {
   if (!YOUTUBE_API_KEY) return null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), YOUTUBE_API_TIMEOUT_MS);
@@ -675,6 +677,24 @@ export async function fetchOfficialMeta(id) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 拉取官方 v3 元数据（对外入口）。`retries` 为失败后的重试次数（每次独立超时预算）。
+ * 重试只给降级路径用：无直链可给时，多等一轮换完整的官方作者信息是划算的；
+ * 竞速成功路径保持单次（retries=0），避免 googleapis 故障时拖慢正常解析的首屏。
+ * 每次失败都记 warn 日志（此前静默回退，排查「作者信息缺失」只能靠猜）。
+ */
+export async function fetchOfficialMeta(id, retries = 0) {
+  if (!YOUTUBE_API_KEY) return null;
+  let result = await fetchOfficialMetaOnce(id);
+  for (let i = 0; i < retries && result && !result.ok; i++) {
+    logger.warn(
+      `[youtube] 官方 v3 元数据失败（status=${result.status || 0} ${result.reason || ""}），重试 ${i + 1}/${retries}`
+    );
+    result = await fetchOfficialMetaOnce(id);
+  }
+  return result;
 }
 
 /** YouTube 专有风控文案关键词：实例到达 YouTube 但该视频被要求登录确认 */
@@ -953,8 +973,14 @@ export async function parseYoutube(url) {
 
   // 竞速失败：等两个元数据源就绪。任一确认视频存在即降级官方嵌入播放——
   // 官方 v3 优先（富信息齐全，desc/头像/统计照常展示），oEmbed 次之。
+  // 降级路径不赶时间（本就无直链可给）：v3 首次失败再重试一次，尽量拿全
+  // 官方作者信息（头像/@频道号/简介/订阅/投稿/累计播放），拿不到才退 oEmbed
+  // （oEmbed 只有标题/频道名/封面，频道卡会缺作者详情）。
   const oembed = await metaP;
-  const v3 = v3P ? await v3P : null;
+  let v3 = v3P ? await v3P : null;
+  if (v3P && !v3?.ok) {
+    v3 = await fetchOfficialMeta(id, 1);
+  }
   const meta = v3?.ok ? v3 : oembed;
   if (meta?.ok) {
     logger.log(`[youtube] 解析源不可用，降级为官方嵌入播放 id=${id}`);

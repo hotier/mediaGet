@@ -65,7 +65,7 @@ Configure in `.env` for full functionality:
 - `YOUTUBE_INVIDIOUS_HOSTS` — 逗号分隔的 Invidious 解析服务（请求 `<base>/api/v1/videos/{videoId}`）
 - `YOUTUBE_SOURCE_TIMEOUT_MS` — YouTube 单源请求超时（默认 6000）；注：yt-dlp 仅剩 TikTok 路由使用（`src/lib/tiktokDlp.js`）；YouTube 失败与 embedOnly 降级结果均不写缓存（共享 24h / 内存 5min），瞬时故障重试即重新解析
 - `YOUTUBE_API_KEY` — 可选：YouTube Data API v3 密钥（Google Cloud 开通）。配置后官方 v3 成为「优先元数据源」（**只补元数据、不提供直链**，下载仍靠 Piped/Invidious 竞速）：标题/简介/频道真实头像/播放/点赞/发布时间/订阅/时长以官方为准，并附频道号 @handle（`authorId`，主页链接升级为 handle 形式）、频道简介（`sign`）、投稿数（`videoCount`）、频道累计播放（`channelViews`），前端仅在拿到值时展示；v3 不可用或超时时自动回退 oEmbed，未配置时行为与此前完全一致。配额默认 1 万单位/天，每次解析约 2 单位（videos.list + channels.list，频道字段全部在现有 snippet,statistics 请求内，不加请求）
-- `YOUTUBE_API_TIMEOUT_MS` — 官方 v3 元数据整体超时（默认 5000，videos+channels 两次请求共享此预算），超时自动放弃并回退原链路
+- `YOUTUBE_API_TIMEOUT_MS` — 官方 v3 元数据整体超时（默认 5000，videos+channels 两次请求共享此预算），超时自动放弃并回退原链路；竞速成功路径 v3 失败即回退、不重试（不拖慢首屏），降级（embedOnly）路径 v3 失败自动重试一次（每次独立预算）并记 warn 日志，尽量保住官方作者信息
 - `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` — Turso (libsql) database for parse analytics; when unset, analytics is silently disabled
 - `STATS_API_KEY` — Bearer key protecting `GET /api/stats`; when unset, the stats endpoint returns 403
 - `LIVE_URL_*` (21 variables) — Real share URLs for live tests (see `tests/live/urls.example.env`)

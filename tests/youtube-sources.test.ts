@@ -2,7 +2,7 @@
 /**
  * YouTube 纯 HTTP 多源方案 —— 纯函数层单测（不发任何网络请求）
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   extractVideoId,
   pickYoutubeFormat,
@@ -647,5 +647,21 @@ describe("buildSuccess 清晰度档位下发（B站同款 qualities）", () => {
     const r = buildSuccess(race([videoOnly]), { ok: false }, "dQw4w9WgXcQ");
     expect(r.data.qualities).toBeUndefined();
     expect(r.data.url).toBe(videoOnly.url);
+  });
+});
+
+describe("未配置 YOUTUBE_API_KEY 时自动降级", () => {
+  it("fetchOfficialMeta 直接返回 null（不发起请求、不重试、不记日志），主链路自动跳过 v3", async () => {
+    vi.stubEnv("YOUTUBE_API_KEY", "");
+    vi.resetModules();
+    try {
+      const mod = await import("@/lib/youtube");
+      // 无 Key：无论传什么视频 id 都立即返回 null，不产生任何网络请求。
+      // parseYoutube 两条路径均以 v3P 非空为前提，null 时自然回退：
+      // 竞速成功 → 直链源字段；竞速失败 → oEmbed 兜底 embedOnly；均不触碰 v3。
+      await expect(mod.fetchOfficialMeta("dQw4w9WgXcQ")).resolves.toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
