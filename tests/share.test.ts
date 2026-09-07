@@ -172,10 +172,10 @@ const cases: ShareParseCase[] = [
     expectUrl: "https://x.com/foo/status/1234567890123456789",
   },
   {
-    name: "weibo.cn-绿洲域",
-    input: "https://weibo.cn/feed/xxx",
-    expectPlatform: "lvzhou",
-    expectUrl: "https://weibo.cn/feed/xxx",
+    name: "weibo.cn-移动端（绿洲下线后回归微博）",
+    input: "https://m.weibo.cn/detail/4912345678901234",
+    expectPlatform: "weibo",
+    expectUrl: "https://m.weibo.cn/detail/4912345678901234",
   },
   // TikTok
   {
@@ -189,6 +189,43 @@ const cases: ShareParseCase[] = [
     input: "TikTok：https://vm.tiktok.com/abcDEF123/ 快看！",
     expectPlatform: "tiktok",
     expectUrl: "https://vm.tiktok.com/abcDEF123/",
+  },
+  // Instagram / YouTube
+  {
+    name: "instagram-帖子",
+    input: "来看看这个：https://www.instagram.com/p/Cm7uZQNLJH0/",
+    expectPlatform: "instagram",
+    expectUrl: "https://www.instagram.com/p/Cm7uZQNLJH0/",
+  },
+  {
+    name: "instagram-短链-instagr.am",
+    input: "IG 快看 https://instagr.am/p/Cm7uZQNLJH0/",
+    expectPlatform: "instagram",
+    expectUrl: "https://instagr.am/p/Cm7uZQNLJH0/",
+  },
+  {
+    name: "instagram-reels",
+    input: "https://www.instagram.com/reel/Cm7uZQNLJH0/?igsh=xxx",
+    expectPlatform: "instagram",
+    expectUrl: "https://www.instagram.com/reel/Cm7uZQNLJH0/?igsh=xxx",
+  },
+  {
+    name: "youtube-标准链接",
+    input: "这个视频不错 https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    expectPlatform: "youtube",
+    expectUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  },
+  {
+    name: "youtube-短链-youtu.be",
+    input: "https://youtu.be/dQw4w9WgXcQ?si=xxxx",
+    expectPlatform: "youtube",
+    expectUrl: "https://youtu.be/dQw4w9WgXcQ?si=xxxx",
+  },
+  {
+    name: "youtube-shorts",
+    input: "Shorts 太好看了 https://www.youtube.com/shorts/abcDEF123ghi",
+    expectPlatform: "youtube",
+    expectUrl: "https://www.youtube.com/shorts/abcDEF123ghi",
   },
   // 复杂/边界
   {

@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     template: `%s - ${siteConfig.name}`,
   },
   description:
-    "在线免费短视频解析工具，支持抖音、快手、B站、微博、小红书、西瓜、虎牙、X 等 24+ 平台，粘贴链接即得无水印视频下载地址，无需安装、即贴即用。",
+    "在线免费短视频解析工具，支持抖音、快手、B站、微博、小红书、西瓜、TikTok、X、Instagram、YouTube 等 20+ 平台，粘贴链接即得无水印视频下载地址，无需安装、即贴即用。",
   keywords: [
     "视频解析",
     "短视频解析",
@@ -33,14 +33,13 @@ export const metadata: Metadata = {
     "西瓜视频解析",
     "虎牙解析",
     "皮皮虾解析",
-    "微视解析",
-    "火山解析",
-    "梨视频解析",
     "AcFun解析",
-    "美拍解析",
     "全民K歌解析",
+    "TikTok解析",
     "X视频解析",
     "Twitter解析",
+    "Instagram解析",
+    "YouTube解析",
     "视频解析工具",
     "免费视频解析",
     "在线视频解析",
@@ -51,7 +50,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: `${siteConfig.name} - 短视频解析下载工具`,
     description:
-      "免费在线短视频解析，支持抖音、快手、B站、微博、小红书、西瓜、虎牙、X 等 24+ 平台，粘贴链接即得无水印视频下载地址。",
+      "免费在线短视频解析，支持抖音、快手、B站、微博、小红书、西瓜、TikTok、X、Instagram、YouTube 等 20+ 平台，粘贴链接即得无水印视频下载地址。",
     url: siteConfig.url,
     siteName: siteConfig.name,
     type: "website",
@@ -64,7 +63,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: `${siteConfig.name} - 短视频解析下载工具`,
     description:
-      "免费在线短视频解析，支持抖音、快手、B站、微博、小红书、西瓜、虎牙、X 等 24+ 平台，粘贴链接即得无水印视频下载地址。",
+      "免费在线短视频解析，支持抖音、快手、B站、微博、小红书、西瓜、TikTok、X、Instagram、YouTube 等 20+ 平台，粘贴链接即得无水印视频下载地址。",
     images: ["/og-image.png"],
   },
   robots: {
@@ -91,10 +90,12 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className="scroll-smooth" suppressHydrationWarning>
       <head>
-        {/* 主题初始化：body 渲染前同步挂载 class，避免闪烁（FOUC） */}
+        {/* 主题初始化：body 渲染前同步挂载 class，避免闪烁（FOUC）
+            主题三态：light / dark / system（跟随设备，默认）
+            存储值缺省或为 system 时，跟随系统偏好并监听其变化实时切换 */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.add(d?"dark":"light");}catch(e){document.documentElement.classList.add("light");}})();`,
+            __html: `(function(){function mode(){try{var t=localStorage.getItem("theme");return t==="light"||t==="dark"||t==="system"?t:"system";}catch(e){return "system";}}function apply(){var m=mode();var d=m==="dark"||(m==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var el=document.documentElement;el.classList.remove("dark","light");el.classList.add(d?"dark":"light");}apply();try{window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",apply);}catch(e){}})();`,
           }}
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -111,7 +112,7 @@ export default function RootLayout({
               applicationCategory: "UtilityApplication",
               operatingSystem: "Any",
               description:
-                "免费在线短视频解析工具，支持抖音、快手、B站、微博、小红书、西瓜、虎牙、X 等 24+ 平台，粘贴链接即得无水印视频下载地址。",
+                "免费在线短视频解析工具，支持抖音、快手、B站、微博、小红书、西瓜、TikTok、X、Instagram、YouTube 等 20+ 平台，粘贴链接即得无水印视频下载地址。",
               inLanguage: "zh-CN",
               offers: { "@type": "Offer", price: "0", priceCurrency: "CNY" },
             }),

@@ -109,4 +109,11 @@ export interface ApiResponse {
   msg: string;
   platform?: VideoPlatformKey;
   data?: ParseData;
+  /**
+   * 失败细分类型（YouTube 等解析器返回，code 非 200 时可能有值）：
+   * bot-gated（视频需登录验证）/ sources-down（解析源暂不可用）/
+   * not-found（视频不存在或受限）/ no-sources / unreachable。
+   * 前端据此给出针对性提示，普通失败无此字段。
+   */
+  failType?: string;
 }

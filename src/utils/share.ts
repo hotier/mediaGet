@@ -32,7 +32,6 @@ export function hasValidVideoUrl(text: string): boolean {
     "weibo.com",
     "weibo.cn",
     "video.weibo.com",
-    "oasis.weibo.cn",
     "xiaohongshu.com",
     "xhslink.com",
     "xhslink.cn",
@@ -41,17 +40,10 @@ export function hasValidVideoUrl(text: string): boolean {
     "music.douyin.com",
     "h5.pipigx.com",
     "h5.pipix.com",
-    "share.huoshan.com",
-    "huoshan.com",
-    "weishi.qq.com",
     "ixigua.com",
     "xiaochuankeji.cn",
-    "xspshare.baidu.com",
-    "pearvideo.com",
     "huya.com",
     "acfun.cn",
-    "meipai.com",
-    "doupai.cc",
     "kg.qq.com",
     "xinpianchang.com",
     "haokan.baidu.com",
@@ -63,6 +55,11 @@ export function hasValidVideoUrl(text: string): boolean {
     "tiktok.com",
     "vm.tiktok.com",
     "vt.tiktok.com",
+    // 海外主流社媒
+    "instagram.com",
+    "instagr.am",
+    "youtube.com",
+    "youtu.be",
   ];
   const t = text.toLowerCase();
   return supported.some((d) => t.includes(d));
@@ -88,44 +85,48 @@ export function detectPlatform(text: string): VideoPlatformKey | null {
     return "bilibili";
   if (lower.includes("v.huya.com") || lower.includes("huya.com")) return "huya";
   if (lower.includes("acfun.cn")) return "acfun";
-  if (lower.includes("pearvideo.com")) return "lishipin";
   if (lower.includes("ixigua.com")) return "xigua";
-  if (lower.includes("huoshan.com") || lower.includes("share.huoshan.com"))
-    return "huoshan";
-  if (lower.includes("weishi.qq.com")) return "weishi";
   if (lower.includes("xiaochuankeji.cn")) return "zuiyou";
-  if (lower.includes("xspshare.baidu.com")) return "quanmin";
   if (
     lower.includes("haokan.baidu.com") ||
     lower.includes("haokan.hao123.com")
   ) {
     return "haokan";
   }
-  if (lower.includes("meipai.com")) return "meipai";
-  if (lower.includes("doupai.cc")) return "doupai";
   if (lower.includes("kg.qq.com")) return "quanminkge";
   if (lower.includes("xinpianchang.com")) return "xinpianchang";
-  if (lower.includes("oasis.weibo.cn")) return "lvzhou";
 
   try {
     const href = firstUrl.startsWith("http")
       ? firstUrl
       : `https://${firstUrl}`;
     const host = new URL(href).hostname.toLowerCase();
-    if (host === "weibo.cn") return "lvzhou";
     if (host === "6.cn" || host.endsWith(".6.cn")) return "sixroom";
   } catch {
     /* ignore */
   }
 
+  if (lower.includes("instagram.com") || lower.includes("instagr.am"))
+    return "instagram";
+  if (
+    lower.includes("youtube.com") ||
+    lower.includes("youtu.be") ||
+    lower.includes("youtube-nocookie.com")
+  ) {
+    return "youtube";
+  }
   if (
     lower.includes("xhslink.com") ||
     lower.includes("xhslink.cn") ||
     lower.includes("xiaohongshu.com")
   )
     return "xhs";
-  if (lower.includes("video.weibo.com")) return "weibo";
-  if (lower.includes("weibo.com")) return "weibo";
+  if (
+    lower.includes("video.weibo.com") ||
+    lower.includes("weibo.com") ||
+    lower.includes("weibo.cn")
+  )
+    return "weibo";
   if (lower.includes("v.kuaishou.com") || lower.includes("kuaishou.com"))
     return "kuaishou";
   if (lower.includes("h5.pipigx.com")) return "pipigx";

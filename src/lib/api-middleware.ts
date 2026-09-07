@@ -86,26 +86,21 @@ const ROUTE_DOMAIN_MAP: Record<string, { name: string; hosts: string[] }> = {
   bilibili: { name: "哔哩哔哩", hosts: ["bilibili.com", "b23.tv"] },
   xhs: { name: "小红书", hosts: ["xiaohongshu.com", "xhslink.com", "xhslink.cn"] },
   kuaishou: { name: "快手", hosts: ["kuaishou.com", "kuaishoup.com"] },
-  weibo: { name: "微博", hosts: ["weibo.com"] },
-  lvzhou: { name: "绿洲", hosts: ["weibo.cn"] },
+  weibo: { name: "微博", hosts: ["weibo.com", "weibo.cn"] },
   ppxia: { name: "皮皮虾", hosts: ["pipix.com"] },
   pipigx: { name: "皮皮搞笑", hosts: ["pipigx.com"] },
-  huoshan: { name: "火山", hosts: ["huoshan.com"] },
-  weishi: { name: "微视", hosts: ["weishi.qq.com"] },
   xigua: { name: "西瓜视频", hosts: ["ixigua.com"] },
   zuiyou: { name: "最右", hosts: ["izuiyou.com", "xiaochuankeji.com", "xiaochuankeji.cn"] },
-  quanmin: { name: "度小视", hosts: ["quanmin.baidu.com", "xspshare.baidu.com"] },
-  lishipin: { name: "梨视频", hosts: ["pearvideo.com"] },
   huya: { name: "虎牙", hosts: ["huya.com"] },
   acfun: { name: "AcFun", hosts: ["acfun.cn"] },
-  meipai: { name: "美拍", hosts: ["meipai.com"] },
-  doupai: { name: "逗拍", hosts: ["doupai.cc"] },
   quanminkge: { name: "全民K歌", hosts: ["kg.qq.com", "quanmin.kg.qq.com"] },
   sixroom: { name: "六间房", hosts: ["6.cn"] },
   xinpianchang: { name: "新片场", hosts: ["xinpianchang.com"] },
   haokan: { name: "好看视频", hosts: ["haokan.baidu.com", "haokan.hao123.com"] },
   twitter: { name: "X (Twitter)", hosts: ["twitter.com", "x.com", "t.co"] },
   tiktok: { name: "TikTok", hosts: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"] },
+  instagram: { name: "Instagram", hosts: ["instagram.com", "instagr.am"] },
+  youtube: { name: "YouTube", hosts: ["youtube.com", "youtu.be", "youtube-nocookie.com"] },
 };
 
 // 通用 API 处理函数
@@ -375,13 +370,16 @@ export const createApiHandler = (
         );
       }
 
-      if (shouldCache) {
+      // 只缓存成功结果（code===200）。失败多为瞬时（上游风控/解析源波动），
+      // 若也写入缓存会把失败粘住 24h（共享缓存）/数分钟（内存），用户重试永远
+      // 命中失败。失败下次请求自动重新解析；同链接内存 5 分钟内也不重复写失败。
+      if (shouldCache && result?.code === 200) {
         setCacheResponse(sanitizedUrl, result);
       }
 
-      // 共享结果缓存：写入最终归一化结果（含 platform），好友/他人再打开同一
+      // 共享结果缓存：写入最终归一化成功结果（含 platform），好友/他人再打开同一
       // 分享链接时 24h 内直接命中，不再全量重新解析
-      if (sharedCache) {
+      if (sharedCache && result?.code === 200) {
         await putResultCache(sanitizedUrl, result);
       }
 

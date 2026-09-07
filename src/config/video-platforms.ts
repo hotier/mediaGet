@@ -28,12 +28,6 @@ export const VIDEO_PLATFORMS = {
     gradient: "from-[#e6162d] to-[#ff4d6a]",
     logo: "/logos/sinaweibo.svg",
   },
-  lvzhou: {
-    name: "绿洲",
-    emoji: "🌿",
-    color: "#31c27c",
-    gradient: "from-[#31c27c] to-[#5fd99a]",
-  },
   xhs: {
     name: "小红书",
     emoji: "📝",
@@ -62,19 +56,6 @@ export const VIDEO_PLATFORMS = {
     gradient: "from-[#ff6b6b] to-[#ff8787]",
     logo: "/logos/pipixia.svg",
   },
-  huoshan: {
-    name: "火山",
-    emoji: "🌋",
-    color: "#ff4757",
-    gradient: "from-[#ff4757] to-[#ff6b81]",
-    logo: "/logos/huoshan.svg",
-  },
-  weishi: {
-    name: "微视",
-    emoji: "📹",
-    color: "#feca57",
-    gradient: "from-[#feca57] to-[#ff9ff3]",
-  },
   xigua: {
     name: "西瓜视频",
     emoji: "🍉",
@@ -89,20 +70,6 @@ export const VIDEO_PLATFORMS = {
     gradient: "from-[#5f27cd] to-[#341f97]",
     logo: "/logos/zuiyou.svg",
   },
-  quanmin: {
-    name: "度小视",
-    emoji: "📲",
-    color: "#3742fa",
-    gradient: "from-[#3742fa] to-[#2f3542]",
-    logo: "/logos/quanmin.svg",
-  },
-  lishipin: {
-    name: "梨视频",
-    emoji: "🍐",
-    color: "#2ed573",
-    gradient: "from-[#2ed573] to-[#7bed9f]",
-    logo: "/logos/lishipin.svg",
-  },
   huya: {
     name: "虎牙",
     emoji: "🐯",
@@ -116,19 +83,6 @@ export const VIDEO_PLATFORMS = {
     color: "#fd4c5d",
     gradient: "from-[#fd4c5d] to-[#fdcb6e]",
     logo: "/logos/acfun.svg",
-  },
-  meipai: {
-    name: "美拍",
-    emoji: "💃",
-    color: "#e056fd",
-    gradient: "from-[#e056fd] to-[#686de0]",
-    logo: "/logos/meipai.svg",
-  },
-  doupai: {
-    name: "逗拍",
-    emoji: "🎬",
-    color: "#00d2d3",
-    gradient: "from-[#00d2d3] to-[#54a0ff]",
   },
   quanminkge: {
     name: "全民K歌",
@@ -163,7 +117,7 @@ export const VIDEO_PLATFORMS = {
     emoji: "𝕏",
     color: "#14171a",
     gradient: "from-[#14171a] to-[#657786]",
-    logo: "/logos/x-white.svg",
+    logo: "/logos/x.svg",
   },
   tiktok: {
     name: "TikTok",
@@ -171,6 +125,20 @@ export const VIDEO_PLATFORMS = {
     color: "#010101",
     gradient: "from-[#010101] to-[#25f4ee]",
     logo: "/logos/tiktok.svg",
+  },
+  instagram: {
+    name: "Instagram",
+    emoji: "📸",
+    color: "#E4405F",
+    gradient: "from-[#E4405F] to-[#833AB4]",
+    logo: "/logos/instagram.svg",
+  },
+  youtube: {
+    name: "YouTube",
+    emoji: "▶️",
+    color: "#FF0000",
+    gradient: "from-[#FF0000] to-[#ff4d4d]",
+    logo: "/logos/youtube.svg",
   },
 } as const;
 

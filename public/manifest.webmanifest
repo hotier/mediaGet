@@ -1,7 +1,7 @@
 {
   "name": "即刻解析 短视频解析",
   "short_name": "即刻解析",
-  "description": "支持抖音、快手、B站、微博、小红书等 24+ 平台的短视频解析与下载工具",
+  "description": "支持抖音、快手、B站、微博、小红书、西瓜、TikTok、X、Instagram、YouTube 等 20+ 平台的短视频解析与下载工具",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#051210",

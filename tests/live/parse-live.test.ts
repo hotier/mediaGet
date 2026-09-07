@@ -13,22 +13,18 @@ import { GET as GETXhs } from "@/app/api/xhs/route.js";
 import { GET as GETQsmusic } from "@/app/api/qsmusic/route.js";
 import { GET as GETPipigx } from "@/app/api/pipigx/route.js";
 import { GET as GETPpxia } from "@/app/api/ppxia/route.js";
-import { GET as GETHuoshan } from "@/app/api/huoshan/route.js";
-import { GET as GETWeishi } from "@/app/api/weishi/route.js";
 import { GET as GETXigua } from "@/app/api/xigua/route.js";
 import { GET as GETZuiyou } from "@/app/api/zuiyou/route.js";
-import { GET as GETQuanmin } from "@/app/api/quanmin/route.js";
-import { GET as GETLishipin } from "@/app/api/lishipin/route.js";
 import { GET as GETHuya } from "@/app/api/huya/route.js";
 import { GET as GETAcfun } from "@/app/api/acfun/route.js";
-import { GET as GETMeipai } from "@/app/api/meipai/route.js";
-import { GET as GETDoupai } from "@/app/api/doupai/route.js";
 import { GET as GETQuanminkge } from "@/app/api/quanminkge/route.js";
 import { GET as GETSixroom } from "@/app/api/sixroom/route.js";
 import { GET as GETXinpianchang } from "@/app/api/xinpianchang/route.js";
 import { GET as GETHaokan } from "@/app/api/haokan/route.js";
-import { GET as GETLvzhou } from "@/app/api/lvzhou/route.js";
 import { GET as GETTwitter } from "@/app/api/twitter/route.js";
+import { GET as GETTiktok } from "@/app/api/tiktok/route.js";
+import { GET as GETInstagram } from "@/app/api/instagram/route.js";
+import { GET as GETYoutube } from "@/app/api/youtube/route.js";
 
 const RUN = process.env.RUN_LIVE_PARSE === "1";
 
@@ -103,12 +99,6 @@ const CASES = [
     GET: GETKuaishou,
   },
   { id: "weibo", path: "/api/weibo", envKey: "LIVE_URL_WEIBO", GET: GETWeibo },
-  {
-    id: "lvzhou",
-    path: "/api/lvzhou",
-    envKey: "LIVE_URL_LVZHOU",
-    GET: GETLvzhou,
-  },
   { id: "xhs", path: "/api/xhs", envKey: "LIVE_URL_XHS", GET: GETXhs },
   {
     id: "qsmusic",
@@ -123,41 +113,10 @@ const CASES = [
     GET: GETPipigx,
   },
   { id: "ppxia", path: "/api/ppxia", envKey: "LIVE_URL_PPXIA", GET: GETPpxia },
-  {
-    id: "huoshan",
-    path: "/api/huoshan",
-    envKey: "LIVE_URL_HUOSHAN",
-    GET: GETHuoshan,
-  },
-  {
-    id: "weishi",
-    path: "/api/weishi",
-    envKey: "LIVE_URL_WEISHI",
-    GET: GETWeishi,
-  },
   { id: "xigua", path: "/api/xigua", envKey: "LIVE_URL_XIGUA", GET: GETXigua },
   { id: "zuiyou", path: "/api/zuiyou", envKey: "LIVE_URL_ZUIYOU", GET: GETZuiyou },
-  {
-    id: "quanmin",
-    path: "/api/quanmin",
-    envKey: "LIVE_URL_QUANMIN",
-    GET: GETQuanmin,
-  },
-  {
-    id: "lishipin",
-    path: "/api/lishipin",
-    envKey: "LIVE_URL_LISHIPIN",
-    GET: GETLishipin,
-  },
   { id: "huya", path: "/api/huya", envKey: "LIVE_URL_HUYA", GET: GETHuya },
   { id: "acfun", path: "/api/acfun", envKey: "LIVE_URL_ACFUN", GET: GETAcfun },
-  {
-    id: "meipai",
-    path: "/api/meipai",
-    envKey: "LIVE_URL_MEIPAI",
-    GET: GETMeipai,
-  },
-  { id: "doupai", path: "/api/doupai", envKey: "LIVE_URL_DOUPAI", GET: GETDoupai },
   {
     id: "quanminkge",
     path: "/api/quanminkge",
@@ -187,6 +146,24 @@ const CASES = [
     path: "/api/twitter",
     envKey: "LIVE_URL_TWITTER",
     GET: GETTwitter,
+  },
+  {
+    id: "tiktok",
+    path: "/api/tiktok",
+    envKey: "LIVE_URL_TIKTOK",
+    GET: GETTiktok,
+  },
+  {
+    id: "instagram",
+    path: "/api/instagram",
+    envKey: "LIVE_URL_INSTAGRAM",
+    GET: GETInstagram,
+  },
+  {
+    id: "youtube",
+    path: "/api/youtube",
+    envKey: "LIVE_URL_YOUTUBE",
+    GET: GETYoutube,
   },
 ] as const;
 

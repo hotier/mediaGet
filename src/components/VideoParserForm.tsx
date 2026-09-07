@@ -23,7 +23,12 @@ import {
 } from "lucide-react";
 
 interface VideoParserFormProps {
-  onResult: (data: ApiResponse | null, errorMsg: string) => void;
+  /**
+   * data=成功结果 / null；errorMsg=错误文案；errorKind=失败细分类型
+   * （透传后端 ApiResponse.failType，如 YouTube 的 bot-gated / sources-down），
+   * 供父组件按失败形态渲染差异化提示。
+   */
+  onResult: (data: ApiResponse | null, errorMsg: string, errorKind?: string) => void;
   setLoading: (loading: boolean) => void;
   loading: boolean;
   pickedPlatform?: VideoPlatformKey | "auto" | null;
@@ -177,7 +182,7 @@ export default function VideoParserForm({
           setHasResult(true);
           writeCache(cacheKey, data);
         } else {
-          onResult(null, data.msg || "解析失败");
+          onResult(null, data.msg || "解析失败", data.failType || "");
         }
       } catch (err) {
         // 主动取消不算失败，静默处理

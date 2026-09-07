@@ -15,24 +15,19 @@ export const platformRoutes = {
   huya: () => import("@/app/api/huya/route.js"),
   haokan: () => import("@/app/api/haokan/route.js"),
   weibo: () => import("@/app/api/weibo/route.js"),
-  weishi: () => import("@/app/api/weishi/route.js"),
   xigua: () => import("@/app/api/xigua/route.js"),
-  huoshan: () => import("@/app/api/huoshan/route.js"),
   acfun: () => import("@/app/api/acfun/route.js"),
-  lishipin: () => import("@/app/api/lishipin/route.js"),
   // 皮皮虾目录是 ppxia
   pipixia: () => import("@/app/api/ppxia/route.js"),
   pipigx: () => import("@/app/api/pipigx/route.js"),
   sixroom: () => import("@/app/api/sixroom/route.js"),
-  lvzhou: () => import("@/app/api/lvzhou/route.js"),
-  meipai: () => import("@/app/api/meipai/route.js"),
   zuiyou: () => import("@/app/api/zuiyou/route.js"),
-  quanmin: () => import("@/app/api/quanmin/route.js"),
   quanminkge: () => import("@/app/api/quanminkge/route.js"),
-  doupai: () => import("@/app/api/doupai/route.js"),
   xinpianchang: () => import("@/app/api/xinpianchang/route.js"),
   twitter: () => import("@/app/api/twitter/route.js"),
   tiktok: () => import("@/app/api/tiktok/route.js"),
+  instagram: () => import("@/app/api/instagram/route.js"),
+  youtube: () => import("@/app/api/youtube/route.js"),
 };
 
 /** 平台 key → 解析函数获取器（兼容注册函数与动态导入的 route） */

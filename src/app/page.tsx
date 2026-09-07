@@ -14,10 +14,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { AlertCircle, Check, ChevronDown, X, Zap } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  CloudOff,
+  ShieldAlert,
+  X,
+  Zap,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// 平台名称单一数据源：从配置读取，避免与代码脱节（之前 README/SEO 只列了 7 个，实际 24 个）
+// 平台名称单一数据源：从配置读取，避免与代码脱节（之前 README/SEO 只列了 7 个，实际 20 个）
 const PLATFORM_NAMES = Object.values(VIDEO_PLATFORMS).map((p) => p.name);
 
 // 首页会话：切页返回 / 刷新后恢复解析结果与错误提示（同一标签页会话内保留）
@@ -31,6 +39,9 @@ let introPlayed = false;
 export default function Home() {
   const [result, setResult] = useState<ApiResponse | null>(null);
   const [error, setError] = useState("");
+  // 失败细分类型（对应 ApiResponse.failType：bot-gated / sources-down 等），
+  // 用于错误提示按失败形态差异化渲染
+  const [errorKind, setErrorKind] = useState("");
   const [loading, setLoading] = useState(false);
   const [pickedPlatform, setPickedPlatform] = useState<VideoPlatformKey | "auto" | null>(null);
   const [pickNonce, setPickNonce] = useState(0);
@@ -56,12 +67,14 @@ export default function Home() {
       const saved: {
         result?: ApiResponse | null;
         error?: string;
+        errorKind?: string;
         activePlatform?: VideoPlatformKey | "auto";
       } = JSON.parse(raw);
       if (saved.result && (saved.result.code === 1 || saved.result.code === 200)) {
         setResult(saved.result);
       }
       if (typeof saved.error === "string") setError(saved.error);
+      if (typeof saved.errorKind === "string") setErrorKind(saved.errorKind);
       if (saved.activePlatform) setActivePlatform(saved.activePlatform);
     } catch {
       // 损坏的会话数据：忽略
@@ -73,20 +86,73 @@ export default function Home() {
     try {
       sessionStorage.setItem(
         HOME_SESSION_KEY,
-        JSON.stringify({ result, error, activePlatform })
+        JSON.stringify({ result, error, errorKind, activePlatform })
       );
     } catch {
       // 配额满或不可写：静默失败
     }
-  }, [result, error, activePlatform]);
+  }, [result, error, errorKind, activePlatform]);
 
   const handleParseResult = (
     data: ApiResponse | null,
-    errorMsg: string = ""
+    errorMsg: string = "",
+    kind: string = ""
   ) => {
     setResult(data);
     setError(errorMsg);
+    // 无错误文案时同步清空失败类型，避免上一次的类型样式残留
+    setErrorKind(errorMsg ? kind : "");
   };
+
+  // 按失败类型选择错误提示的视觉与文案（failType 由后端 youtube.js 细分）：
+  // - bot-gated：视频被 YouTube 判定需登录验证——明确告知用户不是解析服务故障
+  // - sources-down：公共解析源暂不可用——引导稍后重试/反馈
+  // - 其余失败（含未带 failType 的其他平台报错）保持通用红色提示
+  const errorPresentation = (() => {
+    if (errorKind === "bot-gated") {
+      return {
+        Icon: ShieldAlert,
+        border: "border-l-amber-500",
+        iconWrap: "bg-amber-500/10",
+        icon: "text-amber-500",
+        titleCls: "text-amber-500",
+        bodyCls: "text-sm text-amber-400/90",
+        title: "该视频需登录验证，暂无法匿名解析",
+        tips: [
+          "这是 YouTube 的登录风控（数据中心 / 代理出口的匿名访问常被要求「确认您不是机器人」），并非解析服务故障，公共解析源同样无法绕过。",
+          "可稍后重试或更换网络环境（家庭宽带 / 手机流量）后再试。",
+          "确需下载时，可改用已登录 YouTube 的浏览器或本地下载工具获取。",
+          `仍无法解决，可反馈站长：${siteConfig.contactEmail}`,
+        ],
+      };
+    }
+    if (errorKind === "sources-down") {
+      return {
+        Icon: CloudOff,
+        border: "border-l-blue-500",
+        iconWrap: "bg-blue-500/10",
+        icon: "text-blue-500",
+        titleCls: "text-blue-500",
+        bodyCls: "text-sm text-blue-400/90",
+        title: "解析源暂时不可用",
+        tips: [
+          "用于获取直链的公共解析源当前不可用（YouTube 对自动化请求风控较严），并非视频本身问题。",
+          "可稍后重试；若长期如此，可反馈站长排查解析源。",
+          `反馈邮箱：${siteConfig.contactEmail}`,
+        ],
+      };
+    }
+    return {
+      Icon: AlertCircle,
+      border: "border-l-error",
+      iconWrap: "bg-red-500/10",
+      icon: "text-error",
+      titleCls: "text-red-500",
+      bodyCls: "text-sm text-red-400/90",
+      title: "解析失败",
+      tips: [] as string[],
+    };
+  })();
 
   return (
     <>
@@ -197,23 +263,46 @@ export default function Home() {
             {/* Error State */}
             {error && (
               <div className={cn("mt-6", enterAnimated && "reveal")}>
-                <Card className="border-l-4 border-l-error p-5">
+                <Card className={cn("border-l-4 p-5", errorPresentation.border)}>
                   <div className="flex items-start gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10">
-                      <AlertCircle className="h-5 w-5 text-error" />
+                    <div
+                      className={cn(
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                        errorPresentation.iconWrap
+                      )}>
+                      <errorPresentation.Icon
+                        className={cn("h-5 w-5", errorPresentation.icon)}
+                      />
                     </div>
                     <div className="flex-1">
-                      <h3 className="mb-1 font-semibold text-red-500">解析失败</h3>
-                      <p className="text-sm text-red-400/90">{error}</p>
-                      <p className="mt-3 text-xs leading-relaxed text-muted">
-                        遇到问题？可稍后重试，或更换网络环境后再试；仍无法解决时，
-                        可通过邮件联系站长反馈：{siteConfig.contactEmail}
-                      </p>
+                      <h3
+                        className={cn(
+                          "mb-1 font-semibold",
+                          errorPresentation.titleCls
+                        )}>
+                        {errorPresentation.title}
+                      </h3>
+                      <p className={errorPresentation.bodyCls}>{error}</p>
+                      {errorPresentation.tips.length > 0 ? (
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted">
+                          {errorPresentation.tips.map((tip) => (
+                            <li key={tip}>{tip}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-xs leading-relaxed text-muted">
+                          遇到问题？可稍后重试，或更换网络环境后再试；仍无法解决时，
+                          可通过邮件联系站长反馈：{siteConfig.contactEmail}
+                        </p>
+                      )}
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setError("")}
+                      onClick={() => {
+                        setError("");
+                        setErrorKind("");
+                      }}
                       aria-label="关闭错误提示">
                       <X />
                     </Button>
