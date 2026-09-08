@@ -190,7 +190,7 @@ export default function Home() {
               />
             </div>
 
-            {/* 平台支持：默认折叠，不挤占首屏；平台项 href 保留供 SEO 收录 */}
+            {/* 平台支持：默认折叠，不挤占首屏；点击即把该平台设为待解析平台 */}
             <Collapsible className="mt-4 rounded-2xl border border-border-subtle bg-glass-1 shadow-card backdrop-blur">
               <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3.5 text-sm font-medium text-primary select-none">
                 <span className="inline-flex items-center gap-2">
@@ -234,11 +234,10 @@ export default function Home() {
                       // 网格内用短名，避免超长名换行/截断（X (Twitter) → X）
                       const label = p.name.replace(" (Twitter)", "");
                       return (
-                        <a
+                        <button
                           key={key}
-                          href={`/platform/${key}`}
-                          onClick={(e) => {
-                            e.preventDefault();
+                          type="button"
+                          onClick={() => {
                             setPickedPlatform(k);
                             setPickNonce((n) => n + 1);
                           }}
@@ -252,7 +251,7 @@ export default function Home() {
                           )}>
                           <PlatformIcon platform={k} size={16} />
                           <span className="truncate">{label}</span>
-                        </a>
+                        </button>
                       );
                     })}
                   </nav>

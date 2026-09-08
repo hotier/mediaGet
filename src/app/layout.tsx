@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import BackToTop from "@/components/BackToTop";
-import Footer from "@/components/Footer";
+import RootExtras from "@/components/RootExtras";
 import SiteHeader from "@/components/SiteHeader";
 import { siteConfig } from "@/config/site";
 
@@ -126,9 +125,8 @@ export default function RootLayout({
         <div className="relative flex min-h-screen flex-1 flex-col" style={{ zIndex: 1 }}>
           <SiteHeader />
           <main className="flex-1">{children}</main>
-          {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
-          <BackToTop />
-          <Footer />
+          {/* 回到顶部 + 页脚：沉浸式页面（/music）中由 RootExtras 自行隐藏 */}
+          <RootExtras />
         </div>
       </body>
     </html>

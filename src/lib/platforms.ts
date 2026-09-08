@@ -24,6 +24,7 @@ export const PLATFORMS = {
   TIKTOK: "tiktok",
   INSTAGRAM: "instagram",
   YOUTUBE: "youtube",
+  QQ_MUSIC: "qqmusic",
 } as const;
 
 type PlatformKey = (typeof PLATFORMS)[keyof typeof PLATFORMS];
@@ -172,6 +173,14 @@ export const PLATFORM_INFO: Record<PlatformKey, PlatformInfoEntry> = {
     shortDomains: ["youtu.be"],
     supportsIdParse: false,
   },
+  [PLATFORMS.QQ_MUSIC]: {
+    name: "QQ音乐",
+    nameEn: "QQ Music",
+    // c6.y.qq.com（App 分享短链）/ i.y.qq.com（分享 webview）由后缀规则覆盖
+    domains: ["y.qq.com"],
+    shortDomains: [],
+    supportsIdParse: true,
+  },
 };
 
 // 从 URL 识别平台
@@ -244,6 +253,8 @@ export const ALL_DOMAINS: string[] = [
   "instagr.am",
   "youtube.com",
   "youtu.be",
+  "y.qq.com",
+  "c6.y.qq.com",
   // 短链接域名
   "v.douyin.com",
   "v.kuaishou.com",

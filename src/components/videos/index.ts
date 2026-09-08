@@ -4,6 +4,7 @@ export { default as KuaishouVideo } from "./KuaishouVideo";
 export { default as WeiboVideo } from "./WeiboVideo";
 export { default as XhsVideo } from "./XhsVideo";
 export { default as QsMusicVideo } from "./QsMusicVideo";
+export { default as QymusicVideo } from "./QymusicVideo";
 export { default as PipigxVideo } from "./PipigxVideo";
 export { default as PpxiaVideo } from "./PpxiaVideo";
 export { default as TwitterVideo } from "./TwitterVideo";

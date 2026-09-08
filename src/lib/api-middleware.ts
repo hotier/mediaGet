@@ -106,6 +106,7 @@ const ROUTE_DOMAIN_MAP: Record<string, { name: string; hosts: string[] }> = {
   tiktok: { name: "TikTok", hosts: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"] },
   instagram: { name: "Instagram", hosts: ["instagram.com", "instagr.am"] },
   youtube: { name: "YouTube", hosts: ["youtube.com", "youtu.be", "youtube-nocookie.com"] },
+  qqmusic: { name: "QQ音乐", hosts: ["y.qq.com"] },
 };
 
 // 通用 API 处理函数

@@ -482,6 +482,144 @@ GET /api/health
 
 ---
 
+## 12. 通用音乐获取（多音乐源聚合）
+
+**接口**: `GET /api/music`
+
+**说明**: 多音乐源聚合接口（music-api.gdstudio.xyz，覆盖网易云/酷我/JOOX/QQ音乐等曲库）。通过 `action` 分流三种能力，适合「搜歌 → 试听/下载 → 封面」一体化流程：
+
+| action | 能力 | 适用场景 |
+|--------|------|----------|
+| `url`（默认） | 按「音乐源 + 曲目ID」取播放直链 | 已持有曲目 ID 的调用方 |
+| `search` | 按歌名/歌手搜歌，支持服务端分页 | 前端关键词搜索 |
+| `pic` | 用 search 结果里的 `pic_id` 换专辑封面直链 | 播放器显示封面 |
+
+共用参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| source | string | 选填 | 音乐源，默认 `netease`。可选：`netease`、`tencent`、`kuwo`、`tidal`、`qobuz`、`joox`、`bilibili`、`apple`、`ytmusic`、`spotify`（部分源暂未开放） |
+| action | string | 选填 | `url` / `search` / `pic`，默认 `url` |
+| fmt | string | 选填 | `text` 时返回纯文本（仅 `url`/`pic` 有效，成功为直链一行；搜索恒为 JSON） |
+
+### 12.1 `action=url`：取播放直链
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 曲目 ID（即 track_id），不同源取值规则不同，可通过 `action=search` 获得 |
+| br | string | 选填 | 音质，默认 `999`。可选 `128`、`192`、`320`、`740`（16bit 无损）、`999`（24bit 无损） |
+
+> `track_id` 可作为 `id` 的兼容别名传入。参数白名单在入口先校验（source 需在可选项、br 需在可选值内），减少无效上游流量。
+
+**示例请求**:
+```
+GET /api/music?source=netease&id=347230&br=128
+GET /api/music?source=tencent&id=0039MnYb0qxYhV&br=320
+GET /api/music?source=netease&id=347230&br=999&fmt=text
+```
+
+**响应示例**:
+```json
+{
+  "code": 200,
+  "msg": "获取成功",
+  "data": {
+    "url": "https://m701.music.126.net/20260908114356/xxx.mp3",
+    "br": 128,
+    "size": 5217010,
+    "source": "netease",
+    "id": "347230"
+  }
+}
+```
+
+> 说明：`data.br` 为上游实际返回的音质；`data.size` 为文件大小（**实测单位为字节**，与上游文档标注的 KB 不符，此处原样透传不做换算）。
+
+### 12.2 `action=search`：关键词搜歌（服务端分页）
+
+搜索源仅开放 `netease` / `kuwo` / `joox` 三家，其余 source 返回 400。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| keyword | string | 是 | 搜索关键词（歌名/歌手），空返回 400 |
+| count | string | 选填 | 每页条数，默认 `10`，最大 `20` |
+| page | string | 选填 | 页码，默认 `1`，最大 `20` |
+
+分页语义：`netease` / `kuwo` 支持按 `count`/`page` 逐页翻；`joox` 实测无视分页、首屏整页返回（约 30 条）。因此响应带 `hasMore` 由后端判定——仅「实回条数回满请求数且未到页码上限」为 `true`，joox 整页超量时自动判为无更多，前端无需感知各源差异，按 `hasMore` 决定是否展示「加载更多」即可。
+
+**示例请求**:
+```
+GET /api/music?action=search&source=netease&keyword=晴天&count=10&page=1
+GET /api/music?action=search&source=kuwo&keyword=晴天&count=10&page=2
+```
+
+**响应示例**:
+```json
+{
+  "code": 200,
+  "msg": "搜索成功",
+  "data": {
+    "source": "netease",
+    "keyword": "晴天",
+    "page": 1,
+    "hasMore": true,
+    "count": 10,
+    "items": [
+      {
+        "id": "2652820720",
+        "urlId": "2652820720",
+        "picId": "109951173569626660",
+        "name": "晴天",
+        "artist": ["周杰伦"],
+        "album": "叶惠美",
+        "source": "netease"
+      }
+    ]
+  }
+}
+```
+
+> 字段说明：`urlId` 为请求直链应使用的 ID（个别源与 `id` 不一致）；`picId` 为专辑封面 id，需经 `action=pic` 二次换取真实图片 URL（无专辑歌曲可能为空串）。
+
+### 12.3 `action=pic`：专辑封面换取
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | `action=search` 结果里的 `picId`（封面 id，非曲目 id） |
+| size | string | 选填 | `300`（默认）/ `500`，其他值回落 300 |
+
+**示例请求**:
+```
+GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
+```
+
+**响应示例**:
+```json
+{
+  "code": 200,
+  "msg": "获取成功",
+  "data": {
+    "url": "https://p2.music.126.net/xxx/109951173569626660.jpg?param=300y300",
+    "source": "netease",
+    "id": "109951173569626660",
+    "size": 300
+  }
+}
+```
+
+> 封面 URL 统一升级为 https（酷我等图床原生返回 http，但其 CDN 支持 TLS），避免线上 https 页面 mixed-content 被浏览器拦截。
+
+**失败分类**（各 action 通用，响应带 `failType` 便于程序判断）:
+
+| 状态码 | failType | 场景 |
+|--------|----------|------|
+| 400 | - | 参数非法：`source` 不在白名单 / `br` 不在可选值 / `id` 缺失 / 搜索 `keyword` 为空 / `pic` 缺 `id` |
+| 400 | `source-unavailable` | source 在上游侧被拒（暂未开放/不可用）；搜索源未开放 |
+| 404 | `not-found` | 直链：曲目不存在或该源无可用音源；封面：pic_id 无效或无专辑封面 |
+| 502 | `sources-down` | 上游接口网络异常 / 响应无法解析 |
+
+---
+
 ## 限制说明
 
 ### 速率限制
@@ -570,6 +708,9 @@ if (data.code === 200) {
 ```bash
 # 抖音解析
 curl "https://get.hotier.cc.cd/api/douyin?url=https://v.douyin.com/xxx/"
+
+# 通用音乐源获取（多源聚合）
+curl "https://get.hotier.cc.cd/api/music?source=netease&id=347230&br=128"
 
 # 健康检查
 curl "https://get.hotier.cc.cd/api/health"

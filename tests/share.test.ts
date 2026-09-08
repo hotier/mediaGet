@@ -284,6 +284,20 @@ const cases: ShareParseCase[] = [
     expectPlatform: "bilibili",
     expectUrl: "https://b23.tv/abcdefg",
   },
+  // QQ音乐
+  {
+    name: "qqmusic-歌曲页链接",
+    input:
+      "分享周杰伦的单曲《晴天》: https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV（来自QQ音乐）",
+    expectPlatform: "qqmusic",
+    expectUrl: "https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV",
+  },
+  {
+    name: "qqmusic-App分享短链",
+    input: "我正在听《孤勇者》，推荐给你 https://c6.y.qq.com/base/fcgi-bin/u?__=AbCdEfGh=",
+    expectPlatform: "qqmusic",
+    expectUrl: "https://c6.y.qq.com/base/fcgi-bin/u?__=AbCdEfGh=",
+  },
 ];
 
 describe("share utils", () => {

@@ -45,6 +45,8 @@ export function hasValidVideoUrl(text: string): boolean {
     "huya.com",
     "acfun.cn",
     "kg.qq.com",
+    "y.qq.com",
+    "c6.y.qq.com",
     "xinpianchang.com",
     "haokan.baidu.com",
     "haokan.hao123.com",
@@ -94,6 +96,7 @@ export function detectPlatform(text: string): VideoPlatformKey | null {
     return "haokan";
   }
   if (lower.includes("kg.qq.com")) return "quanminkge";
+  if (lower.includes("y.qq.com")) return "qqmusic";
   if (lower.includes("xinpianchang.com")) return "xinpianchang";
 
   try {

@@ -140,6 +140,13 @@ export const VIDEO_PLATFORMS = {
     gradient: "from-[#FF0000] to-[#ff4d4d]",
     logo: "/logos/youtube.svg",
   },
+  qqmusic: {
+    name: "QQ音乐",
+    emoji: "🎼",
+    color: "#31C27C",
+    gradient: "from-[#31C27C] to-[#5ED5A2]",
+    logo: "/logos/qqmusic.svg",
+  },
 } as const;
 
 export type VideoPlatformKey = keyof typeof VIDEO_PLATFORMS;

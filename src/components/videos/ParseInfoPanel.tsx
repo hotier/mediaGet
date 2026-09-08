@@ -270,6 +270,13 @@ const PLATFORM_FIELDS: Record<string, FieldDef[]> = {
     { key: "core", label: "来源" },
     TYPE_FIELD,
   ],
+  qqmusic: [
+    { key: "name", label: "歌曲" },
+    { key: "author", label: "歌手" },
+    { key: "album", label: "专辑" },
+    { key: "core", label: "来源" },
+    TYPE_FIELD,
+  ],
   // 博主卡已展示：昵称 / 用户名 / 简介 / 关注 / 粉丝，这里只保留推文内容相关信息
   twitter: [
     { key: "time", label: "发布时间", format: formatTime },

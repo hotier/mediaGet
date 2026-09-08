@@ -1,17 +1,7 @@
 import type { MetadataRoute } from "next";
 import { siteConfig } from "@/config/site";
-import { VIDEO_PLATFORMS } from "@/config/video-platforms";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const platformPages: MetadataRoute.Sitemap = Object.keys(
-    VIDEO_PLATFORMS
-  ).map((key) => ({
-    url: `${siteConfig.url}/platform/${key}`,
-    lastModified: new Date(),
-    changeFrequency: "weekly",
-    priority: 0.8,
-  }));
-
   return [
     {
       url: siteConfig.url,
@@ -19,7 +9,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily",
       priority: 1,
     },
-    ...platformPages,
+    {
+      url: `${siteConfig.url}/music`,
+      lastModified: new Date(),
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
     {
       url: `${siteConfig.url}/legal/terms`,
       lastModified: new Date(),

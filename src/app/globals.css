@@ -298,3 +298,71 @@
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
 }
+
+/* === 自定义媒体进度/音量滑杆（音乐播放器） ===
+   轨道底色由组件内联渐变填充（已播放比例用 accent），
+   这里只定义滑杆外观与拇指，保证浅/暗色主题一致。 */
+.media-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  cursor: pointer;
+  outline: none;
+  touch-action: manipulation;
+}
+
+.media-range:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.media-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease;
+}
+
+.media-range::-webkit-slider-thumb:hover,
+.media-range::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+}
+
+.media-range::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease;
+}
+
+.media-range::-moz-range-thumb:hover,
+.media-range::-moz-range-thumb:active {
+  transform: scale(1.15);
+}
+
+/* 唱片盘：纯装饰态使用 */
+@keyframes disc-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-disc-spin {
+  animation: disc-spin 8s linear infinite;
+}
+
+.animation-paused {
+  animation-play-state: paused;
+}

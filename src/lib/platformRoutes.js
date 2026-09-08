@@ -28,6 +28,7 @@ export const platformRoutes = {
   tiktok: () => import("@/app/api/tiktok/route.js"),
   instagram: () => import("@/app/api/instagram/route.js"),
   youtube: () => import("@/app/api/youtube/route.js"),
+  qqmusic: () => import("@/app/api/qqmusic/route.js"),
 };
 
 /** 平台 key → 解析函数获取器（兼容注册函数与动态导入的 route） */
@@ -62,6 +63,17 @@ export async function getPlatformParser(platform) {
       };
       if (typeof mod.parseVideoId === "function") {
         routeParser.parseVideoId = mod.parseVideoId;
+      } else if (platform === "qqmusic") {
+        // qqmusic 的 source+id 解析已从路由模块移出（Next 路由模块不允许
+        // 额外具名导出，否则 next build 类型校验失败），改从 lib 模块挂载。
+        try {
+          const idMod = await import("@/lib/qqmusic-id.js");
+          if (typeof idMod.parseVideoId === "function") {
+            routeParser.parseVideoId = idMod.parseVideoId;
+          }
+        } catch {
+          // 挂载失败按不支持 ID 解析处理（统一解析器会给出明确提示）
+        }
       }
       return routeParser;
     }

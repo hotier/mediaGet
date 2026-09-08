@@ -22,6 +22,7 @@ const MONOGRAM: Partial<Record<VideoPlatformKey, string>> = {
   tiktok: "T",
   instagram: "IG",
   youtube: "YT",
+  qqmusic: "Q",
 };
 
 /**
