@@ -21,7 +21,20 @@
  *   非法 source / 参数返回 { detail }（与 types=url 一致）。
  */
 
-export const GD_MUSIC_API = "https://music-api.gdstudio.xyz/api.php";
+/**
+ * 上游基址解析：
+ * 1. 优先取环境变量 MUSIC_API_BASE（指向自建的、能从此部署环境访问的兼容实例，
+ *    例如海外 Vercel 出口访问公共 GD 音乐台会被其 Cloudflare 人机校验拦截，需自建上游）；
+ * 2. 未配置时回落到 GD 音乐台公共实例。
+ * 注意：公共实例仅对普通民用网络友好，云厂商/数据中心出口大概率被 CF 校验页拦截。
+ */
+function resolveUpstreamBase() {
+  if (typeof process === "undefined" || !process.env) return "";
+  return String(process.env.MUSIC_API_BASE || "").trim().replace(/\/+$/, "");
+}
+
+export const GD_MUSIC_API =
+  resolveUpstreamBase() || "https://music-api.gdstudio.xyz/api.php";
 
 /** 支持的 source → 展示名（netease 为上游默认源） */
 export const GD_SOURCES = {

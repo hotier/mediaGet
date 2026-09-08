@@ -60,6 +60,7 @@ Configure in `.env` for full functionality:
 - `XHS_COOKIE` — Xiaohongshu parsing（数据中心/海外出口被风控时强烈建议配置）
 - `WEIBO_COOKIE` — Weibo parsing
 - `IG_COOKIE` — Instagram parsing（Instagram 对匿名访客开启登录墙，公开内容也需服务端配置登录态 Cookie；缺失时解析器返回明确提示）
+- `MUSIC_API_BASE` — 音乐聚合上游基址覆盖（`src/lib/gdmusic.js`，默认公共 GD 音乐台 `https://music-api.gdstudio.xyz/api.php`）。**重要**：公共实例仅对普通家用网络可用；对云厂商/数据中心出口（Vercel 美东 `iad1` 函数即属此类）会触发其 Cloudflare 人机校验，表现为本机 dev 正常、线上 `/api/music` 各 action 全部 502/失败（详见 `API.md` §12 开头）。线上部署若必须请求该公共实例，需自建一个「该环境可直连、无风控」的 gdstudio 契约兼容上游（如 GD 音乐台开源版自托管在无海外拦截的服务器），再把地址配到此环境变量
 - YouTube parsing is pure HTTP (serverless-friendly)，**不依赖 yt-dlp、无必填 API Key**：oEmbed 确认视频存在 + 并发竞速多个 Piped/Invidious 实例取下载直链。成功结果恒带官方嵌入信息（`data.videoId` / `data.embedUrl`，前端 YouTubeVideo 组件渲染官方 iframe 在线播放，不依赖任何解析实例）；解析源全部不可用但元数据源确认视频存在时，降级返回「仅官方嵌入」成功结果（`data.embedOnly=true`，无 url/audioUrl）——该降级结果不写缓存，解析源恢复后重试即自动拿回直链。2026-09 实测：官方登记 Invidious 实例（docs.invidious.io/instances）匿名 API 已全部被拒（403/401/反爬页），Piped 尚存可用社区实例，公共源整体波动大——稳定使用请配置下面两个自托管解析源环境变量。可选：配置 `YOUTUBE_API_KEY` 启用官方 Data API v3 作为**优先元数据源**（仅元数据、无直链），embedOnly 降级时也能凭官方数据补齐富信息卡（见下）。前端国内可达性处理：官方 iframe 播放依赖用户网络直连 YouTube（不可代理）；其余资源均经服务端转发——头像/封面经 `/api/image`（YouTubeVideo 内代理失败自动回退直链），「直链播放」兜底与下载经 `/api/video-proxy`（`googlevideo.com` 与 Piped `pipedproxy` 域已纳入 `utils/videoProxy` 的 `needsVideoProxy` 判定，非防盗链而是网络可达性原因）
 - `YOUTUBE_PIPED_HOSTS` — 逗号分隔的 Piped 解析服务（默认内置若干公共实例）。支持裸域名或完整 `https://...`（可填自托管实例，请求 `<base>/streams/{videoId}`）
 - `YOUTUBE_INVIDIOUS_HOSTS` — 逗号分隔的 Invidious 解析服务（请求 `<base>/api/v1/videos/{videoId}`）

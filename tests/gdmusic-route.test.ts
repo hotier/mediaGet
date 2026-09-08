@@ -316,7 +316,7 @@ describe("GET /api/music?action=search（关键词搜歌）", () => {
     expect((await noKeyword.json()).msg).toContain("keyword");
 
     const badAction = await GET(
-      new Request("http://127.0.0.1/api/music?action=lyric", {
+      new Request("http://127.0.0.1/api/music?action=bogus", {
         headers: { "x-forwarded-for": "203.0.113.42" },
       })
     );
@@ -498,5 +498,143 @@ describe("GET /api/music?action=pic（换取专辑封面）", () => {
     );
     expect(down.status).toBe(502);
     expect((await down.json()).failType).toBe("sources-down");
+  });
+});
+
+describe("GET /api/music?action=lyric（取歌词）", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("成功：上游返回 { lyric } JSON → 200 + 歌词文本", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ lyric: "[00:01.00]测试歌词" }), { status: 200 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=lyric&source=netease&id=123", {
+        headers: { "x-forwarded-for": "198.51.100.7" },
+      })
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.code).toBe(200);
+    expect(json.data.lyric).toContain("测试歌词");
+  });
+
+  it("成功：上游直接返回 LRC 纯文本", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("[00:00.00]歌手 - 歌名", { status: 200 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=lyric&source=netease&id=456", {
+        headers: { "x-forwarded-for": "198.51.100.8" },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.lyric).toContain("歌手 - 歌名");
+  });
+
+  it("上游返回 CF 风控页（200 HTML）→ 502 sources-down，不把校验页当歌词", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        '<!DOCTYPE html><html><head><title>Just a moment...</title><script>window.__cf_chl_opt={cType:"managed"}</script></head><body>Enable JavaScript and cookies to continue</body></html>',
+        { status: 200 }
+      )
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=lyric&source=netease&id=789", {
+        headers: { "x-forwarded-for": "198.51.100.9" },
+      })
+    );
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.code).toBe(502);
+    expect(json.failType).toBe("sources-down");
+  });
+
+  it("上游 5xx → 502 sources-down", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("Service Unavailable", { status: 503 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=lyric&source=netease&id=888", {
+        headers: { "x-forwarded-for": "198.51.100.10" },
+      })
+    );
+    expect(res.status).toBe(502);
+    expect((await res.json()).failType).toBe("sources-down");
+  });
+});
+
+describe("上游被 CF 风控拦截（403/非 JSON）时的错误归类", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("pic：上游 403 HTML（风控页）→ 502 sources-down，而非 404 not-found", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("<html>blocked by cloudflare</html>", { status: 403 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=pic&source=netease&id=111&size=300", {
+        headers: { "x-forwarded-for": "198.51.100.20" },
+      })
+    );
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.code).toBe(502);
+    expect(json.failType).toBe("sources-down");
+  });
+
+  it("pic：上游 200 但 body 非 JSON → 502 sources-down，而非 404 not-found", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("<html>just a moment</html>", { status: 200 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?action=pic&source=netease&id=222&size=300", {
+        headers: { "x-forwarded-for": "198.51.100.21" },
+      })
+    );
+    expect(res.status).toBe(502);
+    expect((await res.json()).failType).toBe("sources-down");
+  });
+
+  it("url：上游 403 HTML（风控页）→ 502 sources-down", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("<html>blocked by cloudflare</html>", { status: 403 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?source=netease&id=333&br=128", {
+        headers: { "x-forwarded-for": "198.51.100.22" },
+      })
+    );
+    expect(res.status).toBe(502);
+    expect((await res.json()).failType).toBe("sources-down");
+  });
+
+  it("url：fmt=text 时上游风控失败返回纯文本错误行（非 JSON）", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("<html>just a moment</html>", { status: 403 })
+    );
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?source=netease&id=444&br=128&fmt=text", {
+        headers: { "x-forwarded-for": "198.51.100.23" },
+      })
+    );
+    expect(res.status).toBe(502);
+    const body = await res.text();
+    expect(body).toContain("音乐源接口暂不可用");
   });
 });

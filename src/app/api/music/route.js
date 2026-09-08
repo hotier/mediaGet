@@ -60,6 +60,20 @@ const REQUEST_HEADERS = {
 };
 const UPSTREAM_TIMEOUT = 8000;
 
+/** 识别上游返回的 CF 人机校验/风控页：GD 音乐台对数据中心出口（如 Vercel 海外机房）会回此页，
+ *  并非真实数据，直接当作“上游暂不可用”处理，避免把校验页塞进歌词/解析结果。 */
+const CF_CHALLENGE_MARKERS = [
+  "__cf_chl",
+  "cf_chl_opt",
+  "Just a moment",
+  "Enable JavaScript and cookies to continue",
+];
+function isCfChallengeBody(text) {
+  if (typeof text !== "string" || !text) return false;
+  const head = text.slice(0, 2000);
+  return CF_CHALLENGE_MARKERS.some((marker) => head.includes(marker));
+}
+
 /** 成功才写缓存的 key：source + id + 请求 br */
 function cacheKey(source, id, br) {
   return `gdmusic:${source}:${id}:${br}`;
@@ -214,8 +228,15 @@ export async function GET(request) {
         headers: REQUEST_HEADERS,
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
       });
+      if (!res.ok) {
+        logger.warn(`gdmusic search upstream http ${res.status} url=${upstreamUrl}`);
+      }
       const json = res.ok ? await res.json().catch(() => null) : null;
       const parsed = parseSearchResponse(json);
+      if (!parsed.ok && parsed.kind === "bad-data" && res.ok) {
+        // 200 但非预期 JSON：多为上游 CF 风控页或接口变更，记日志便于线上排查
+        logger.warn("gdmusic search upstream returned non-JSON body (CF challenge?)");
+      }
 
       if (parsed.ok) {
         // hasMore：仅“回满整页且未到页码上限”才视为有下一页。joox 实测无视 count/pages
@@ -324,27 +345,44 @@ export async function GET(request) {
           headers: REQUEST_HEADERS,
           signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
         });
+        if (!res.ok) {
+          logger.warn(`gdmusic picbin upstream http ${res.status} url=${upstreamUrl}`);
+        }
         const json = res.ok ? await res.json().catch(() => null) : null;
         const parsed = parsePicResponse(json);
 
         if (!parsed.ok || !parsed.url) {
-          const rejected = parsed.kind === "rejected";
-          logMusic(
-            "picbin-failed",
-            rejected ? 400 : 404,
-            `source=${source} pic_id=${picId}`
-          );
+          if (parsed.kind === "rejected") {
+            logMusic("picbin-failed", 400, `source=${source} pic_id=${picId}`);
+            return send(
+              {
+                code: 400,
+                msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCE_UNAVAILABLE],
+                failType: MUSIC_FAILURE.SOURCE_UNAVAILABLE,
+              },
+              400
+            );
+          }
+          if (parsed.kind === "bad-data") {
+            // 上游非预期响应（非 JSON/风控页/HTTP 错误）属于“上游暂不可用”，而非“歌曲无封面”
+            logMusic("picbin-failed", 502, `source=${source} pic_id=${picId}`);
+            return send(
+              {
+                code: 502,
+                msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+                failType: MUSIC_FAILURE.SOURCES_DOWN,
+              },
+              502
+            );
+          }
+          logMusic("picbin-failed", 404, `source=${source} pic_id=${picId}`);
           return send(
             {
-              code: rejected ? 400 : 404,
-              msg: rejected
-                ? MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCE_UNAVAILABLE]
-                : "未找到该歌曲的专辑封面（可能已下架或该源无封面）",
-              failType: rejected
-                ? MUSIC_FAILURE.SOURCE_UNAVAILABLE
-                : MUSIC_FAILURE.NOT_FOUND,
+              code: 404,
+              msg: "未找到该歌曲的专辑封面（可能已下架或该源无封面）",
+              failType: MUSIC_FAILURE.NOT_FOUND,
             },
-            rejected ? 400 : 404
+            404
           );
         }
 
@@ -399,6 +437,9 @@ export async function GET(request) {
         headers: REQUEST_HEADERS,
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
       });
+      if (!res.ok) {
+        logger.warn(`gdmusic pic upstream http ${res.status} url=${upstreamUrl}`);
+      }
       const json = res.ok ? await res.json().catch(() => null) : null;
       const parsed = parsePicResponse(json);
 
@@ -416,8 +457,17 @@ export async function GET(request) {
           failType: MUSIC_FAILURE.SOURCE_UNAVAILABLE,
         };
         status = 400;
+      } else if (parsed.kind === "bad-data") {
+        // 上游非预期响应（非 JSON/风控页/HTTP 错误）属于“上游暂不可用”，而非“歌曲无封面”
+        logger.warn("gdmusic pic upstream returned unusable response (CF challenge?)");
+        payload = {
+          code: 502,
+          msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+          failType: MUSIC_FAILURE.SOURCES_DOWN,
+        };
+        status = 502;
       } else {
-        // not-found / bad-data：pic_id 无效、歌曲无专辑或该源无封面
+        // not-found：pic_id 无效、歌曲无专辑或该源无封面
         payload = {
           code: 404,
           msg: "未找到该歌曲的专辑封面（可能已下架或该源无封面）",
@@ -476,6 +526,19 @@ export async function GET(request) {
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
       });
       const text = await res.text();
+      // GD 音乐台对数据中心/海外出口会返回 CF 风控页：此时拿到的不是歌词，按“上游暂不可用”处理，
+      // 避免把校验页 HTML 当歌词塞给前端
+      if (!res.ok || isCfChallengeBody(text)) {
+        logger.warn(`gdmusic lyric upstream unusable status=${res.status} url=${upstreamUrl}`);
+        return send(
+          {
+            code: 502,
+            msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+            failType: MUSIC_FAILURE.SOURCES_DOWN,
+          },
+          502
+        );
+      }
       let lyric = "";
       if (text) {
         try {
@@ -554,6 +617,9 @@ export async function GET(request) {
       headers: REQUEST_HEADERS,
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
     });
+    if (!res.ok) {
+      logger.warn(`gdmusic url upstream http ${res.status} url=${upstreamUrl}`);
+    }
     const json = res.ok ? await res.json().catch(() => null) : null;
     const parsed = parseTrackResponse(json);
 
