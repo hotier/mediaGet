@@ -192,7 +192,7 @@ describe("GET /api/music?action=search（关键词搜歌）", () => {
     global.fetch = originalFetch;
   });
 
-  it("成功：代理上游 types=search 并归一列表，count/page 缺省取 10/1", async () => {
+  it("成功：代理上游 types=search 并归一列表，count/page 缺省取 20/1", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify([
@@ -221,10 +221,12 @@ describe("GET /api/music?action=search（关键词搜歌）", () => {
     });
     expect(json.data.items[1].urlId).toBe("1945894789");
     expect(json.data.page).toBe(1);
-    expect(json.data.hasMore).toBe(false); // 实回 2 条 < 请求 10 条，判定无更多
+    expect(json.data.hasMore).toBe(false); // 实回 2 条 < 请求 20 条，判定无更多
+    // 结果列表「线路」标注：本页由同源代理命中默认公共基址取回
+    expect(json.data.line).toEqual({ kind: "proxy", base: UPSTREAM });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(global.fetch.mock.calls[0][0]).toBe(
-      `${UPSTREAM}?types=search&source=netease&name=%E6%99%B4%E5%A4%A9&pages=1&count=10`
+      `${UPSTREAM}?types=search&source=netease&name=%E6%99%B4%E5%A4%A9&pages=1&count=20`
     );
   });
 
@@ -636,5 +638,100 @@ describe("上游被 CF 风控拦截（403/非 JSON）时的错误归类", () => 
     expect(res.status).toBe(502);
     const body = await res.text();
     expect(body).toContain("音乐源接口暂不可用");
+  });
+});
+
+describe("多基址链（MUSIC_API_BASES）：主源不可用时自动切换", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.MUSIC_API_BASE;
+    delete process.env.MUSIC_API_BASES;
+  });
+
+  it("url：首基址 403 风控 → 自动切第二基址并成功", async () => {
+    process.env.MUSIC_API_BASES =
+      "https://a.example/api.php,https://b.example/api.php";
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<html>blocked</html>", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ url: "https://cdn.example/c.mp3", br: 128, size: 1 }),
+          { status: 200 }
+        )
+      );
+
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?source=netease&id=123&br=128", {
+        headers: { "x-forwarded-for": "203.0.113.99" },
+      })
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.url).toBe("https://cdn.example/c.mp3");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls[0][0]).toContain("a.example");
+    expect(global.fetch.mock.calls[1][0]).toContain("b.example");
+  });
+
+  it("search：首基址 200 CF 校验页 → 自动切第二基址返回结果", async () => {
+    process.env.MUSIC_API_BASES =
+      "https://a.example/api.php,https://b.example/api.php";
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          '<!DOCTYPE html><title>Just a moment</title><script>window.__cf_chl_opt={}</script>',
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            { id: "1", name: "晴天多源链", artist: ["周杰伦"], url_id: "1", source: "netease" },
+          ]),
+          { status: 200 }
+        )
+      );
+
+    // 用文件内唯一的关键词，避免命中其它用例写入的进程内存缓存（缓存键不含基址）
+    const res = await GET(
+      new Request(
+        "http://127.0.0.1/api/music?action=search&source=netease&keyword=%E6%99%B4%E5%A4%A9%E5%A4%9A%E6%BA%90%E9%93%BE",
+        { headers: { "x-forwarded-for": "203.0.113.99" } }
+      )
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.items[0].name).toBe("晴天多源链");
+    // 首基址（a.example）被 CF 风控，实际由第二基址回源 → 线路标注切到 b.example
+    expect(json.data.line).toEqual({ kind: "proxy", base: "https://b.example/api.php" });
+    expect(global.fetch.mock.calls[1][0]).toContain("b.example");
+  });
+
+  it("url：全部基址不可用 → 502 sources-down，且失败不写缓存", async () => {
+    process.env.MUSIC_API_BASES =
+      "https://a.example/api.php,https://b.example/api.php";
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<html>blocked</html>", { status: 403 }))
+      .mockRejectedValueOnce(new Error("ETIMEDOUT"));
+
+    const res = await GET(
+      new Request("http://127.0.0.1/api/music?source=netease&id=999&br=128", {
+        headers: { "x-forwarded-for": "203.0.113.99" },
+      })
+    );
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.code).toBe(502);
+    expect(json.failType).toBe("sources-down");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });

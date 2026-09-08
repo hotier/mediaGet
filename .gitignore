@@ -60,3 +60,6 @@ next-env.d.ts
 # 本地 AI 助手个人配置（每台机器不同，不进版本库）
 .claude/settings.local.json
 .wrangler/
+
+# 洛雪音源脚本本地验证产物（临时工具/第三方 clone，不进版本库）
+.lx-verify/

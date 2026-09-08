@@ -488,7 +488,9 @@ GET /api/health
 
 **说明**: 多音乐源聚合接口（默认上游 music-api.gdstudio.xyz，覆盖网易云/酷我/JOOX/QQ音乐等曲库）。通过 `action` 分流三种能力，适合「搜歌 → 试听/下载 → 封面」一体化流程：
 
-> **部署环境注意（Vercel/海外机房）**：默认公共上游对数据中心/海外出口会返回 Cloudflare 人机校验页，导致本接口在 Vercel 等云函数环境恒 502（本机 dev 因走家用宽带而正常）。服务端已在各分支对该情况记 warn 日志并把风控页归类为 `502 sources-down`（不再把校验页当歌词/封面）。若需在 Vercel 上稳定使用，请自建 gdstudio 契约兼容的、可被该环境直连的上游实例，并用环境变量 `MUSIC_API_BASE` 覆盖默认基址。
+> **部署环境注意（Vercel/海外机房）**：默认公共上游对数据中心/海外出口会返回 Cloudflare 人机校验页，导致本接口在 Vercel 等云函数环境恒 502（本机 dev 因走家用宽带而正常）。服务端已在各分支对该情况记 warn 日志并把风控页归类为 `502 sources-down`（不再把校验页当歌词/封面）。
+>
+> 上游支持**多基址回退链**：环境变量 `MUSIC_API_BASES`（逗号/空白分隔，按序）或单基址 `MUSIC_API_BASE` 覆盖默认公共实例；每类上游请求按序尝试，主源网络异常 / HTTP 错误 / CF 风控页时自动切换下一个基址（业务级 `rejected` / `not-found` 不回退），总耗时受 8s 预算约束并均分到剩余基址。注意：接入基址必须同为 gdstudio 契约（`types=search/url/pic/lyric` 参数一致）且对该部署出口可达——实测不可达的地址只会拖慢失败；可用线上请求日志 `music … all bases down … reason=` 定位不可用的基址。若基址均不可达，最终仍回落到 `502 sources-down`，前端 `music-client.ts` 随即走浏览器直连兜底（用户民用网络不受数据中心出口拦截影响）。
 
 | action | 能力 | 适用场景 |
 |--------|------|----------|
@@ -544,15 +546,15 @@ GET /api/music?source=netease&id=347230&br=999&fmt=text
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | keyword | string | 是 | 搜索关键词（歌名/歌手），空返回 400 |
-| count | string | 选填 | 每页条数，默认 `10`，最大 `20` |
+| count | string | 选填 | 每页条数，默认 `20`，最大 `20` |
 | page | string | 选填 | 页码，默认 `1`，最大 `20` |
 
 分页语义：`netease` / `kuwo` 支持按 `count`/`page` 逐页翻；`joox` 实测无视分页、首屏整页返回（约 30 条）。因此响应带 `hasMore` 由后端判定——仅「实回条数回满请求数且未到页码上限」为 `true`，joox 整页超量时自动判为无更多，前端无需感知各源差异，按 `hasMore` 决定是否展示「加载更多」即可。
 
 **示例请求**:
 ```
-GET /api/music?action=search&source=netease&keyword=晴天&count=10&page=1
-GET /api/music?action=search&source=kuwo&keyword=晴天&count=10&page=2
+GET /api/music?action=search&source=netease&keyword=晴天&count=20&page=1
+GET /api/music?action=search&source=kuwo&keyword=晴天&count=20&page=2
 ```
 
 **响应示例**:
@@ -565,7 +567,11 @@ GET /api/music?action=search&source=kuwo&keyword=晴天&count=10&page=2
     "keyword": "晴天",
     "page": 1,
     "hasMore": true,
-    "count": 10,
+    "count": 20,
+    "line": {
+      "kind": "proxy",
+      "base": "https://music-api.gdstudio.xyz/api.php"
+    },
     "items": [
       {
         "id": "2652820720",
@@ -581,7 +587,7 @@ GET /api/music?action=search&source=kuwo&keyword=晴天&count=10&page=2
 }
 ```
 
-> 字段说明：`urlId` 为请求直链应使用的 ID（个别源与 `id` 不一致）；`picId` 为专辑封面 id，需经 `action=pic` 二次换取真实图片 URL（无专辑歌曲可能为空串）。
+> 字段说明：`urlId` 为请求直链应使用的 ID（个别源与 `id` 不一致）；`picId` 为专辑封面 id，需经 `action=pic` 二次换取真实图片 URL（无专辑歌曲可能为空串）。`line` 标记本页结果取回的通道与上游实例：`kind=proxy` 表示经本站同源代理（命中 `MUSIC_API_BASES`/`MUSIC_API_BASE` 中的哪个基址由 `base` 给出，多基址链下每页可能不同），浏览器端在代理不可用时还会用直连通道兜底（此时由前端自行标注 `kind=direct`，指向公共 GD 源）。
 
 ### 12.3 `action=pic`：专辑封面换取
 

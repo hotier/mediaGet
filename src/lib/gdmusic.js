@@ -22,19 +22,49 @@
  */
 
 /**
- * 上游基址解析：
- * 1. 优先取环境变量 MUSIC_API_BASE（指向自建的、能从此部署环境访问的兼容实例，
- *    例如海外 Vercel 出口访问公共 GD 音乐台会被其 Cloudflare 人机校验拦截，需自建上游）；
- * 2. 未配置时回落到 GD 音乐台公共实例。
- * 注意：公共实例仅对普通民用网络友好，云厂商/数据中心出口大概率被 CF 校验页拦截。
+ * 上游基址配置（多源链）：
+ * - 单一兼容场景：MUSIC_API_BASE（指向自建的、能从此部署环境访问的兼容实例，例如海外
+ *   Vercel 出口访问公共 GD 音乐台会被其 Cloudflare 人机校验拦截，需自建/换可达上游）。
+ * - 多源场景：MUSIC_API_BASES（逗号/空白分隔的多个同契约基址，按序组成回退链：主源
+ *   网络异常 / HTTP 错误 / CF 风控页时自动切到下一个）。
+ * - 都未配置时回落到 GD 音乐台公共实例（注意：仅对普通民用网络友好，云厂商/数据中心
+ *   出口大概率被 CF 校验页拦截——此时请用上面两个环境变量配置部署环境可达的基址）。
  */
-function resolveUpstreamBase() {
-  if (typeof process === "undefined" || !process.env) return "";
-  return String(process.env.MUSIC_API_BASE || "").trim().replace(/\/+$/, "");
+
+const GD_DEFAULT_BASE = "https://music-api.gdstudio.xyz/api.php";
+
+/** 清理基址：trim + 去尾部斜杠；非 http(s) 视为非法返回空串 */
+function cleanUpstreamBase(value) {
+  const v = String(value ?? "").trim().replace(/\/+$/, "");
+  return /^https?:\/\//i.test(v) ? v : "";
 }
 
-export const GD_MUSIC_API =
-  resolveUpstreamBase() || "https://music-api.gdstudio.xyz/api.php";
+/** 单基址覆盖（历史兼容）：MUSIC_API_BASE */
+function resolveUpstreamBase() {
+  if (typeof process === "undefined" || !process.env) return "";
+  return cleanUpstreamBase(process.env.MUSIC_API_BASE);
+}
+
+/** 兼容导出：主基址（= 默认公共实例，或 MUSIC_API_BASE 覆盖） */
+export const GD_MUSIC_API = resolveUpstreamBase() || GD_DEFAULT_BASE;
+
+/**
+ * 有序上游基址链（每次请求动态读取，便于 env 生效 / 单测注入）：
+ *   MUSIC_API_BASES 存在 → 取其列表（按序去重）；否则 MUSIC_API_BASE → 单基址链；
+ *   都未配置 → [公共默认实例]。
+ * 显式配置时不自动追加公共实例（公共源对数据中心出口不可达，追加只会拖慢失败）；
+ * 若想把它作为末位兜底，请自行写进 MUSIC_API_BASES。
+ */
+export function getUpstreamBases() {
+  if (typeof process === "undefined" || !process.env) return [GD_DEFAULT_BASE];
+  const many = String(process.env.MUSIC_API_BASES || "")
+    .split(/[\s,，;；]+/)
+    .map(cleanUpstreamBase)
+    .filter(Boolean);
+  const single = cleanUpstreamBase(process.env.MUSIC_API_BASE);
+  const list = many.length ? many : single ? [single] : [GD_DEFAULT_BASE];
+  return Array.from(new Set(list));
+}
 
 /** 支持的 source → 展示名（netease 为上游默认源） */
 export const GD_SOURCES = {
@@ -69,7 +99,7 @@ export const GD_SEARCH_SOURCES = {
 export const GD_SEARCH_SOURCE_LIST = Object.keys(GD_SEARCH_SOURCES);
 
 /** 搜索默认/上限：count=每页数量，pages=页码（对齐上游参数名） */
-export const GD_SEARCH_COUNT_DEFAULT = 10;
+export const GD_SEARCH_COUNT_DEFAULT = 20;
 export const GD_SEARCH_COUNT_MAX = 20;
 export const GD_SEARCH_PAGE_MAX = 20;
 

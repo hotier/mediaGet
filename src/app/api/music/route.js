@@ -24,6 +24,7 @@ import {
   buildSearchUrl,
   buildTrackUrl,
   buildUpstreamUrl,
+  getUpstreamBases,
   isSearchableSource,
   isSupportedSource,
   normalizeBr,
@@ -43,14 +44,16 @@ export const runtime = "nodejs";
 
 /**
  * 通用音乐源获取接口（多源聚合）：
- *   GET /api/music?action=search&source=netease&keyword=<关键词>&count=10&page=1  搜歌
+ *   GET /api/music?action=search&source=netease&keyword=<关键词>&count=20&page=1  搜歌
  *   GET /api/music?action=pic&source=netease&id=<pic_id>&size=300                 换封面
  *   GET /api/music?source=netease&id=<track_id>&br=999                            取直链（默认）
  *   GET /api/music?source=netease&id=<track_id>&br=999&fmt=text
  *
- * 代理 music-api.gdstudio.xyz 的 types=search / types=pic / types=url，把上游扁平响应
- * 归一为本服务统一契约 { code, msg, data }；附进程内存 5 分钟缓存（成功才写）、
- * IP 级限流与黑名单拦截。参数白名单在入口先校验，减少无效上游流量。
+ * 代理上游链的 types=search / types=pic / types=url，把上游扁平响应归一为本服务统一
+ * 契约 { code, msg, data }；附进程内存 5 分钟缓存（成功才写）、IP 级限流与黑名单拦截。
+ * 参数白名单在入口先校验，减少无效上游流量。上游为多基址链（见 lib/gdmusic.js
+ * getUpstreamBases）：主源网络异常 / HTTP 错误 / CF 风控页时按顺序自动切换下一个基址，
+ * 业务级结果（rejected / not-found）不回退（编排见 fetchUpstreamChain）。
  */
 
 const REQUEST_HEADERS = {
@@ -72,6 +75,58 @@ function isCfChallengeBody(text) {
   if (typeof text !== "string" || !text) return false;
   const head = text.slice(0, 2000);
   return CF_CHALLENGE_MARKERS.some((marker) => head.includes(marker));
+}
+
+/**
+ * 上游多源链编排：按 getUpstreamBases() 顺序逐个请求，只有“明确不可用”
+ * （网络异常 / 超时 / HTTP 非 2xx / CF 风控页）才切换下一个基址；首个拿到
+ * HTTP 200 且非风控的响应即返回，业务级结果（rejected / not-found / bad-data）
+ * 由调用方解析判定、不回退（GD 契约镜像间曲库一致，回退只救“通道不可用”）。
+ * 总耗时受 UPSTREAM_TIMEOUT 预算约束并均分到剩余基址，避免多基址时等待翻倍。
+ * @param {(base: string) => string} buildUrl 由基址组装该分支的上游 URL
+ * @returns {{ ok: true, base: string, url: string, text: string }
+ *          | { ok: false, reason: string, lastStatus?: number }}
+ */
+async function fetchUpstreamChain(buildUrl) {
+  const bases = getUpstreamBases();
+  const deadline = Date.now() + UPSTREAM_TIMEOUT;
+  let reason = "";
+  let lastStatus = 0;
+  for (let i = 0; i < bases.length; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const left = bases.length - i;
+    // 末位基址吃满剩余预算；其余均分，保证链上后续基址也有机会
+    const attemptMs =
+      i === bases.length - 1
+        ? remaining
+        : Math.max(1500, Math.min(4000, Math.floor(remaining / left)));
+    const url = buildUrl(bases[i]);
+    try {
+      const res = await fetch(url, {
+        headers: REQUEST_HEADERS,
+        signal: AbortSignal.timeout(attemptMs),
+      });
+      const text = await res.text();
+      if (res.ok && !isCfChallengeBody(text)) {
+        return { ok: true, base: bases[i], url, text };
+      }
+      lastStatus = res.status;
+      reason = `http ${res.status}`;
+    } catch (error) {
+      reason = error.message;
+    }
+  }
+  return { ok: false, reason: reason || "timeout", lastStatus };
+}
+
+/** 解析上游文本为 JSON，失败返回 null（非 JSON 响应由各分支按 bad-data 归类） */
+function parseJsonText(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /** 成功才写缓存的 key：source + id + 请求 br */
@@ -194,7 +249,7 @@ export async function GET(request) {
         {
           code: 400,
           msg: "keyword 为空：请输入要搜索的歌曲关键词（歌名 / 歌手等）",
-          usage: "/api/music?action=search&source=netease&keyword=<关键词>&count=10&page=1",
+          usage: "/api/music?action=search&source=netease&keyword=<关键词>&count=20&page=1",
         },
         400
       );
@@ -222,20 +277,24 @@ export async function GET(request) {
 
     let payload;
     let status = 200;
-    try {
-      const upstreamUrl = buildSearchUrl({ source, keyword, count, page });
-      const res = await fetch(upstreamUrl, {
-        headers: REQUEST_HEADERS,
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-      });
-      if (!res.ok) {
-        logger.warn(`gdmusic search upstream http ${res.status} url=${upstreamUrl}`);
-      }
-      const json = res.ok ? await res.json().catch(() => null) : null;
-      const parsed = parseSearchResponse(json);
-      if (!parsed.ok && parsed.kind === "bad-data" && res.ok) {
-        // 200 但非预期 JSON：多为上游 CF 风控页或接口变更，记日志便于线上排查
-        logger.warn("gdmusic search upstream returned non-JSON body (CF challenge?)");
+    const probe = await fetchUpstreamChain((base) =>
+      buildSearchUrl({ source, keyword, count, page, base })
+    );
+    if (!probe.ok) {
+      logger.warn(
+        `music search all bases down source=${source} keyword=${keyword} reason=${probe.reason}`
+      );
+      payload = {
+        code: 502,
+        msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+        failType: MUSIC_FAILURE.SOURCES_DOWN,
+      };
+      status = 502;
+    } else {
+      const parsed = parseSearchResponse(parseJsonText(probe.text));
+      if (!parsed.ok && parsed.kind === "bad-data") {
+        // 200 但非预期 JSON：多为上游接口变更，记日志便于线上排查
+        logger.warn(`music search non-JSON body base=${probe.base}`);
       }
 
       if (parsed.ok) {
@@ -256,10 +315,15 @@ export async function GET(request) {
             hasMore,
             count: parsed.items.length,
             items: parsed.items,
+            // 本页实际命中的上游基址（多基址链下不同检索页可能落到不同线路；
+            // 前端在结果列表将其标注为「线路」，配合浏览器直连降级可区分取回通道）
+            line: { kind: "proxy", base: probe.base },
           },
         };
       } else if (parsed.kind === "rejected") {
-        logger.warn(`gdmusic search source rejected: ${parsed.detail || ""}`);
+        logger.warn(
+          `music search source rejected base=${probe.base}: ${parsed.detail || ""}`
+        );
         payload = {
           code: 400,
           msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCE_UNAVAILABLE],
@@ -274,14 +338,6 @@ export async function GET(request) {
         };
         status = 502;
       }
-    } catch (error) {
-      logger.warn(`gdmusic search upstream error: ${error.message}`);
-      payload = {
-        code: 502,
-        msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
-        failType: MUSIC_FAILURE.SOURCES_DOWN,
-      };
-      status = 502;
     }
 
     if (payload.code === 200) {
@@ -340,16 +396,24 @@ export async function GET(request) {
       }
 
       try {
-        const upstreamUrl = buildPicUrl({ source, id: picId, size });
-        const res = await fetch(upstreamUrl, {
-          headers: REQUEST_HEADERS,
-          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-        });
-        if (!res.ok) {
-          logger.warn(`gdmusic picbin upstream http ${res.status} url=${upstreamUrl}`);
+        const probe = await fetchUpstreamChain((base) =>
+          buildPicUrl({ source, id: picId, size, base })
+        );
+        if (!probe.ok) {
+          logger.warn(
+            `music picbin all bases down source=${source} pic_id=${picId} reason=${probe.reason}`
+          );
+          logMusic("picbin-failed", 502, `source=${source} pic_id=${picId}`);
+          return send(
+            {
+              code: 502,
+              msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+              failType: MUSIC_FAILURE.SOURCES_DOWN,
+            },
+            502
+          );
         }
-        const json = res.ok ? await res.json().catch(() => null) : null;
-        const parsed = parsePicResponse(json);
+        const parsed = parsePicResponse(parseJsonText(probe.text));
 
         if (!parsed.ok || !parsed.url) {
           if (parsed.kind === "rejected") {
@@ -431,17 +495,21 @@ export async function GET(request) {
 
     let payload;
     let status = 200;
-    try {
-      const upstreamUrl = buildPicUrl({ source, id: picId, size });
-      const res = await fetch(upstreamUrl, {
-        headers: REQUEST_HEADERS,
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-      });
-      if (!res.ok) {
-        logger.warn(`gdmusic pic upstream http ${res.status} url=${upstreamUrl}`);
-      }
-      const json = res.ok ? await res.json().catch(() => null) : null;
-      const parsed = parsePicResponse(json);
+    const probe = await fetchUpstreamChain((base) =>
+      buildPicUrl({ source, id: picId, size, base })
+    );
+    if (!probe.ok) {
+      logger.warn(
+        `music pic all bases down source=${source} pic_id=${picId} reason=${probe.reason}`
+      );
+      payload = {
+        code: 502,
+        msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+        failType: MUSIC_FAILURE.SOURCES_DOWN,
+      };
+      status = 502;
+    } else {
+      const parsed = parsePicResponse(parseJsonText(probe.text));
 
       if (parsed.ok) {
         payload = {
@@ -450,7 +518,9 @@ export async function GET(request) {
           data: { url: parsed.url, source, id: picId, size },
         };
       } else if (parsed.kind === "rejected") {
-        logger.warn(`gdmusic pic source rejected: ${parsed.detail || ""}`);
+        logger.warn(
+          `music pic source rejected base=${probe.base}: ${parsed.detail || ""}`
+        );
         payload = {
           code: 400,
           msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCE_UNAVAILABLE],
@@ -458,8 +528,8 @@ export async function GET(request) {
         };
         status = 400;
       } else if (parsed.kind === "bad-data") {
-        // 上游非预期响应（非 JSON/风控页/HTTP 错误）属于“上游暂不可用”，而非“歌曲无封面”
-        logger.warn("gdmusic pic upstream returned unusable response (CF challenge?)");
+        // 上游非预期响应（非 JSON/接口变更）属于“上游暂不可用”，而非“歌曲无封面”
+        logger.warn(`music pic unusable response base=${probe.base}`);
         payload = {
           code: 502,
           msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
@@ -475,14 +545,6 @@ export async function GET(request) {
         };
         status = 404;
       }
-    } catch (error) {
-      logger.warn(`gdmusic pic upstream error: ${error.message}`);
-      payload = {
-        code: 502,
-        msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
-        failType: MUSIC_FAILURE.SOURCES_DOWN,
-      };
-      status = 502;
     }
 
     if (payload.code === 200) {
@@ -519,44 +581,39 @@ export async function GET(request) {
       );
     }
 
-    try {
-      const upstreamUrl = buildUpstreamUrl({ types: "lyric", source, id: lyricId });
-      const res = await fetch(upstreamUrl, {
-        headers: REQUEST_HEADERS,
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-      });
-      const text = await res.text();
+    const probe = await fetchUpstreamChain((base) =>
+      buildUpstreamUrl({ types: "lyric", source, id: lyricId, base })
+    );
+    if (!probe.ok) {
       // GD 音乐台对数据中心/海外出口会返回 CF 风控页：此时拿到的不是歌词，按“上游暂不可用”处理，
       // 避免把校验页 HTML 当歌词塞给前端
-      if (!res.ok || isCfChallengeBody(text)) {
-        logger.warn(`gdmusic lyric upstream unusable status=${res.status} url=${upstreamUrl}`);
-        return send(
-          {
-            code: 502,
-            msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
-            failType: MUSIC_FAILURE.SOURCES_DOWN,
-          },
-          502
-        );
-      }
-      let lyric = "";
-      if (text) {
-        try {
-          const json = JSON.parse(text);
-          if (typeof json.lyric === "string") lyric = json.lyric;
-          else if (typeof json.lrc === "string") lyric = json.lrc;
-          else if (typeof json === "string") lyric = json;
-        } catch {
-          // 上游可能直接返回 LRC 纯文本
-          lyric = text;
-        }
-      }
-      logMusic("lyric", 200, `source=${source} lyric_id=${lyricId}`);
-      return send({ code: 200, msg: "获取成功", data: { lyric: lyric.trim() } }, 200);
-    } catch (error) {
-      logger.warn(`gdmusic lyric upstream error: ${error.message}`);
-      return send({ code: 502, msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN] }, 502);
+      logger.warn(
+        `music lyric all bases down source=${source} lyric_id=${lyricId} reason=${probe.reason}`
+      );
+      return send(
+        {
+          code: 502,
+          msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+          failType: MUSIC_FAILURE.SOURCES_DOWN,
+        },
+        502
+      );
     }
+    const text = probe.text;
+    let lyric = "";
+    if (text) {
+      try {
+        const json = JSON.parse(text);
+        if (typeof json.lyric === "string") lyric = json.lyric;
+        else if (typeof json.lrc === "string") lyric = json.lrc;
+        else if (typeof json === "string") lyric = json;
+      } catch {
+        // 上游可能直接返回 LRC 纯文本
+        lyric = text;
+      }
+    }
+    logMusic("lyric", 200, `source=${source} lyric_id=${lyricId}`);
+    return send({ code: 200, msg: "获取成功", data: { lyric: lyric.trim() } }, 200);
   }
 
   // —— 分支三：action=url（默认）按 id 取直链 ——
@@ -611,17 +668,21 @@ export async function GET(request) {
 
   let payload;
   let status = 200;
-  try {
-    const upstreamUrl = buildTrackUrl({ source, id, br });
-    const res = await fetch(upstreamUrl, {
-      headers: REQUEST_HEADERS,
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT),
-    });
-    if (!res.ok) {
-      logger.warn(`gdmusic url upstream http ${res.status} url=${upstreamUrl}`);
-    }
-    const json = res.ok ? await res.json().catch(() => null) : null;
-    const parsed = parseTrackResponse(json);
+  const probe = await fetchUpstreamChain((base) =>
+    buildTrackUrl({ source, id, br, base })
+  );
+  if (!probe.ok) {
+    logger.warn(
+      `music url all bases down source=${source} id=${id} br=${br} reason=${probe.reason}`
+    );
+    payload = {
+      code: 502,
+      msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
+      failType: MUSIC_FAILURE.SOURCES_DOWN,
+    };
+    status = 502;
+  } else {
+    const parsed = parseTrackResponse(parseJsonText(probe.text));
 
     if (parsed.ok) {
       payload = {
@@ -637,7 +698,7 @@ export async function GET(request) {
       };
     } else if (parsed.kind === "rejected") {
       // source 在上游被拒（如暂未开放）：入口白名单兜不住时在此归类
-      logger.warn(`gdmusic source rejected: ${parsed.detail || ""}`);
+      logger.warn(`music source rejected base=${probe.base}: ${parsed.detail || ""}`);
       payload = {
         code: 400,
         msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCE_UNAVAILABLE],
@@ -659,14 +720,6 @@ export async function GET(request) {
       };
       status = 502;
     }
-  } catch (error) {
-    logger.warn(`gdmusic upstream error: ${error.message}`);
-    payload = {
-      code: 502,
-      msg: MUSIC_FAILURE_MSG[MUSIC_FAILURE.SOURCES_DOWN],
-      failType: MUSIC_FAILURE.SOURCES_DOWN,
-    };
-    status = 502;
   }
 
   if (payload.code === 200) {

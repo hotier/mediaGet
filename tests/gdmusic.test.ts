@@ -1,7 +1,8 @@
 // @ts-nocheck
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   GD_MUSIC_API,
+  getUpstreamBases,
   GD_SOURCES,
   GD_SOURCE_LIST,
   GD_SEARCH_SOURCE_LIST,
@@ -234,11 +235,11 @@ describe("normalizeKeyword", () => {
 });
 
 describe("normalizeCount / normalizePage", () => {
-  it("缺失/非法取默认 10，超上限钳制", () => {
-    expect(normalizeCount()).toBe(10);
-    expect(normalizeCount("abc")).toBe(10);
-    expect(normalizeCount("0")).toBe(10);
-    expect(normalizeCount("-3")).toBe(10);
+  it("缺失/非法取默认 20，超上限钳制", () => {
+    expect(normalizeCount()).toBe(20);
+    expect(normalizeCount("abc")).toBe(20);
+    expect(normalizeCount("0")).toBe(20);
+    expect(normalizeCount("-3")).toBe(20);
     expect(normalizeCount("15")).toBe(15);
     expect(normalizeCount("99")).toBe(20);
   });
@@ -265,7 +266,7 @@ describe("normalizePicSize", () => {
 describe("buildSearchUrl", () => {
   it("默认 source=netease，参数序 types→source→name→pages→count", () => {
     expect(buildSearchUrl({ keyword: "晴天" })).toBe(
-      "https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name=%E6%99%B4%E5%A4%A9&pages=1&count=10"
+      "https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name=%E6%99%B4%E5%A4%A9&pages=1&count=20"
     );
   });
   it("指定 source/page/count，关键词特殊字符被编码", () => {
@@ -328,6 +329,7 @@ describe("parseSearchResponse", () => {
         artist: ["周杰伦"],
         album: "叶惠美",
         source: "netease",
+        lyricId: "2652820720",
       },
       {
         id: "abc123",
@@ -337,6 +339,7 @@ describe("parseSearchResponse", () => {
         album: "",
         picId: "",
         source: "netease",
+        lyricId: "abc123",
       },
     ]);
   });
@@ -401,5 +404,51 @@ describe("parsePicResponse", () => {
     for (const bad of [null, undefined, [], "oops", 123]) {
       expect(parsePicResponse(bad).kind).toBe("bad-data");
     }
+  });
+});
+
+// —— 上游多基址链配置（getUpstreamBases） ——
+
+describe("getUpstreamBases 多源链配置", () => {
+  const DEFAULT_BASE = "https://music-api.gdstudio.xyz/api.php";
+
+  afterEach(() => {
+    delete process.env.MUSIC_API_BASE;
+    delete process.env.MUSIC_API_BASES;
+  });
+
+  it("未配置任何环境变量 → 公共默认实例", () => {
+    expect(getUpstreamBases()).toEqual([DEFAULT_BASE]);
+  });
+
+  it("仅 MUSIC_API_BASE → 单基址链（兼容历史单源覆盖）", () => {
+    process.env.MUSIC_API_BASE = "https://self-host.example/api.php/";
+    expect(getUpstreamBases()).toEqual(["https://self-host.example/api.php"]);
+  });
+
+  it("MUSIC_API_BASES 逗号/空白/中文分隔 → 有序多基址链", () => {
+    process.env.MUSIC_API_BASES =
+      "https://a.example/api.php, https://b.example/api.php；https://c.example/api.php";
+    expect(getUpstreamBases()).toEqual([
+      "https://a.example/api.php",
+      "https://b.example/api.php",
+      "https://c.example/api.php",
+    ]);
+  });
+
+  it("两变量都配置时以 MUSIC_API_BASES 为准（MUSIC_API_BASE 被忽略）", () => {
+    process.env.MUSIC_API_BASES = "https://a.example/api.php";
+    process.env.MUSIC_API_BASE = "https://legacy.example/api.php";
+    expect(getUpstreamBases()).toEqual(["https://a.example/api.php"]);
+  });
+
+  it("重复基址按序去重；非法条目被剔除，全非法时回落默认", () => {
+    process.env.MUSIC_API_BASES =
+      "https://a.example/api.php,https://a.example/api.php,ftp://bad.example/,/relative/path";
+    expect(getUpstreamBases()).toEqual(["https://a.example/api.php"]);
+
+    delete process.env.MUSIC_API_BASES;
+    process.env.MUSIC_API_BASE = "  not-a-url  ";
+    expect(getUpstreamBases()).toEqual([DEFAULT_BASE]);
   });
 });

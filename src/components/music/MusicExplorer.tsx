@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -9,6 +9,7 @@ import {
   Disc3,
   Download,
   Info,
+  Link2,
   Loader2,
   Maximize2,
   Music2,
@@ -33,11 +34,16 @@ import {
   type SearchSourceKey,
 } from "@/components/music/types";
 import {
+  fetchLxCatalog,
+  isDirectUsed,
+  musicLineMeta,
   requestDirect,
   requestLyric,
   requestPic,
+  requestResolve,
   requestSearchPage,
   type DirectData,
+  type LxSearchSource,
   type SearchItem,
 } from "@/lib/music-client";
 import {
@@ -52,6 +58,25 @@ import {
   type CoverPalette,
   sampleCoverPalette,
 } from "@/lib/cover-palette";
+
+/** 搜索源 chip 的统一展示形态：内置 GD 源 + 动态加载的 lx 脚本扩展源 */
+interface SearchChip {
+  key: SearchSourceKey;
+  label: string;
+  color: string;
+  /** 是否为 lx 脚本扩展源（扩展源没有品牌 logo，chip 改渲染彩色圆点区分） */
+  ext?: boolean;
+}
+
+/** lx 扩展源 chip 的强调色：脚本自报名称但无品牌色，按出现顺序轮换配色 */
+const LX_SOURCE_COLORS = [
+  "#a855f7",
+  "#0ea5e9",
+  "#f43f5e",
+  "#f59e0b",
+  "#10b981",
+  "#ec4899",
+];
 
 interface LyricLine {
   time: number;
@@ -170,6 +195,138 @@ function LyricScroller({
   );
 }
 
+interface MiniLyricLineProps {
+  text: string;
+  /** 是否正在播放：仅播放中的超长句才跑马灯，暂停/溢出时退化为省略号 */
+  playing: boolean;
+}
+
+/**
+ * 底部播放栏的「单行实时歌词」（顶替歌手行，不改变底栏高度）。
+ * - 文本宽度不超过可用宽度时居中静态显示；
+ * - 文本溢出且正在播放时启用无缝双副本跑马灯（translateX 0 → -50%）；
+ * - 文本溢出但暂停时左对齐截断，避免静止还一直滚动。
+ * 宽度用隐藏测量副本判断：nowrap 下其 offsetWidth 即文本自然宽度，
+ * 不受父容器裁切/弹性布局影响。
+ */
+function MiniLyricLine({ text, playing }: MiniLyricLineProps) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const probeRef = useRef<HTMLSpanElement | null>(null);
+  const [overflow, setOverflow] = useState(false);
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const probe = probeRef.current;
+    if (!row || !probe) return;
+    const update = () => {
+      if (!rowRef.current || !probeRef.current) return;
+      // +1px 容差：贴边不视为溢出，避免像素级抖动
+      setOverflow(probeRef.current.offsetWidth > rowRef.current.clientWidth + 1);
+    };
+    update();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(update);
+      ro.observe(row);
+      return () => ro.disconnect();
+    }
+  }, [text]);
+
+  const run = playing && overflow;
+  // 动画时长随文本长度放大（8~36s）：短句不至于瞬移，长句不会过快
+  const dur = Math.max(8, Math.min(36, Math.round(text.length * 0.45)));
+  return (
+    <div
+      ref={rowRef}
+      className={cn("mp-lymq", run && "mq", overflow && !playing && "over")}
+      title={text}
+      aria-label={text}>
+      {run ? (
+        <span className="mp-lymq-track" style={{ animationDuration: `${dur}s` }}>
+          <span className="mp-lymq-copy">{text}</span>
+          <span className="mp-lymq-copy" aria-hidden="true">
+            {text}
+          </span>
+        </span>
+      ) : (
+        <span className="mp-lymq-txt">{text}</span>
+      )}
+      {/* 隐藏测量副本：不参与布局，仅提供文本自然宽度 */}
+      <span ref={probeRef} className="mp-lymq-probe" aria-hidden="true">
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/** 播放列表会话快照（localStorage 单份 JSON）：最近一次搜索结果（含已翻页累积）。
+ * 目的：刷新不摧毁列表；同一关键词 + 来源再次搜索，若首页结果与缓存头部一致，
+ * 视为同一份结果，直接沿用缓存里更完整的累积列表，避免重新搜索后只剩第一页。 */
+interface PlaylistSnapshot {
+  /** 搜索关键词；链接解析产物列表存空串 */
+  kw: string;
+  /** 生成该列表时所用的搜索源 chip */
+  source: string;
+  /** 当前已加载到的页号 */
+  page: number;
+  hasMore: boolean;
+  list: SearchItem[];
+}
+const PLAYLIST_CACHE_KEY = "mp-playlist-cache-v2";
+/** 防止 localStorage 塞爆：只保留最近的 N 条，正常翻页远达不到该上限 */
+const PLAYLIST_CACHE_LIMIT = 400;
+
+function readPlaylistSnapshot(): PlaylistSnapshot | null {
+  try {
+    const raw = localStorage.getItem(PLAYLIST_CACHE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Partial<PlaylistSnapshot>;
+    if (!d || !Array.isArray(d.list) || typeof d.kw !== "string") return null;
+    return {
+      kw: d.kw,
+      source: typeof d.source === "string" ? d.source : "",
+      page: typeof d.page === "number" && d.page >= 1 ? d.page : 1,
+      hasMore: Boolean(d.hasMore),
+      list: d.list as SearchItem[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePlaylistSnapshot(s: PlaylistSnapshot): void {
+  try {
+    localStorage.setItem(
+      PLAYLIST_CACHE_KEY,
+      JSON.stringify({
+        ...s,
+        list:
+          s.list.length > PLAYLIST_CACHE_LIMIT
+            ? s.list.slice(-PLAYLIST_CACHE_LIMIT)
+            : s.list,
+      })
+    );
+  } catch {
+    // 隐私模式等写入失败时静默降级，不影响播放
+  }
+}
+
+function clearPlaylistSnapshot(): void {
+  try {
+    localStorage.removeItem(PLAYLIST_CACHE_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 本次搜索首页返回 fresh 是否与缓存列表头部逐条一致（source+id 对齐即可，忽略元数据噪声） */
+function isSameListHead(fresh: SearchItem[], cached: SearchItem[]): boolean {
+  if (!fresh.length || fresh.length > cached.length) return false;
+  return fresh.every((it, i) => {
+    const prev = cached[i];
+    return !!prev && prev.source === it.source && prev.id === it.id;
+  });
+}
+
 /**
  * 音乐播放器页（YesPlayMusic / Apple Music 风格）。
  * 页面内不再自带顶部栏：品牌 logo/title 在全局顶部导航栏；
@@ -184,16 +341,26 @@ export default function MusicExplorer() {
   // —— 视图（由内容区功能区左上角的「发现歌曲 / 播放列表」切换器驱动）与搜索 ——
   const tab = useMusicView();
   const [source, setSource] = useState<SearchSourceKey>(SEARCH_SOURCES[0].key);
+  /** 部署侧启用 lx 音源脚本后动态加载的扩展搜索源（/api/music/lx?action=sources） */
+  const [extSources, setExtSources] = useState<LxSearchSource[]>([]);
   const [keyword, setKeyword] = useState("");
   const [list, setList] = useState<SearchItem[] | null>(null);
   const [searchedKw, setSearchedKw] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
 
+  // —— 查找方式（发现歌曲页内二级切换）：关键词搜索 / 粘贴链接解析 ——
+  const [mode, setMode] = useState<"search" | "resolve">("search");
+  const [link, setLink] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState("");
+
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [paging, setPaging] = useState(false);
   const [pageErr, setPageErr] = useState("");
+  /** 缓存恢复的列表若属于 lx 扩展源：目录未加载完时先挂起，chip 可用后再回填 */
+  const [restoreListSource, setRestoreListSource] = useState<string | null>(null);
 
   // —— 播放状态 ——
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
@@ -224,7 +391,19 @@ export default function MusicExplorer() {
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.8);
+  /** 音量（0~1）：默认 50%；优先从本地缓存恢复上次调整值，无缓存才用默认 */
+  const [volume, setVolume] = useState(() => {
+    try {
+      const raw = localStorage.getItem("mp-player-volume");
+      if (raw !== null) {
+        const n = Number(raw);
+        if (Number.isFinite(n) && n > 0 && n <= 1) return n;
+      }
+    } catch {
+      // SSR 首屏 / 隐私模式等 localStorage 不可用时忽略，落到默认 50%
+    }
+    return 0.5;
+  });
   const [muted, setMuted] = useState(false);
   const [loop, setLoop] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -235,6 +414,8 @@ export default function MusicExplorer() {
   const [tipBubbleW, setTipBubbleW] = useState(0);
   /** 整页歌词视图开关（点击底部播放栏的歌曲封面打开） */
   const [lyricOpen, setLyricOpen] = useState(false);
+  /** 整页歌词「收起中」：先播放收起动画，结束才真正卸载页面 */
+  const [lyricClosing, setLyricClosing] = useState(false);
   /** 歌曲详情弹窗：记录行内点击「详情」的歌曲及其在列表中的位置 */
   const [infoTrack, setInfoTrack] = useState<{ item: SearchItem; index: number } | null>(
     null
@@ -243,6 +424,7 @@ export default function MusicExplorer() {
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const searchAbortRef = useRef<AbortController | null>(null);
+  const resolveAbortRef = useRef<AbortController | null>(null);
   const directAbortRef = useRef<AbortController | null>(null);
   const coverAbortRef = useRef<AbortController | null>(null);
   const paletteAbortRef = useRef<AbortController | null>(null);
@@ -250,6 +432,8 @@ export default function MusicExplorer() {
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const infoCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 整页歌词收起动画结束后延迟卸载的定时器 */
+  const lyricCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 音质热切换时旧直链的播放位置（秒），新源就绪后从该处续播 */
   const resumeAtRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -263,12 +447,60 @@ export default function MusicExplorer() {
   /** 加载下一页防重入标记（ref 保证 onScroll / 补屏两个触发源不会并发翻页） */
   const pagingRef = useRef(false);
 
-  const sourceMeta =
-    SEARCH_SOURCES.find((s) => s.key === source) ?? SEARCH_SOURCES[0];
+  /** 全部可选的搜索源 chip：内置 GD 源固定在前，扩展源紧随其后（key 冲突时内置优先） */
+  const sourceChips = useMemo<SearchChip[]>(() => {
+    const chips: SearchChip[] = SEARCH_SOURCES.map((s) => ({
+      key: s.key,
+      label: s.label,
+      color: s.color,
+    }));
+    const builtinKeys = new Set(chips.map((c) => c.key));
+    for (const s of extSources || []) {
+      if (!s || !s.key || builtinKeys.has(s.key)) continue;
+      chips.push({
+        key: s.key,
+        label: s.label || s.key,
+        color: LX_SOURCE_COLORS[chips.length % LX_SOURCE_COLORS.length],
+        ext: true,
+      });
+    }
+    return chips;
+  }, [extSources]);
+
+  const sourceMeta = sourceChips.find((s) => s.key === source) ?? sourceChips[0];
+
+  // 挂载时拉一次 lx 扩展源目录（成功后才出现扩展 chip；失败保持仅内置源，静默）。
+  // 不传 AbortSignal：music-client 内共享 inflight，StrictMode 双挂载下首个 abort
+  // 会导致共享请求被取消，故仅用 disposed 标志避免卸载后 setState。
+  useEffect(() => {
+    let disposed = false;
+    fetchLxCatalog()
+      .then((cat) => {
+        if (disposed) return;
+        setExtSources(cat.searchSources || []);
+      })
+      .catch(() => {
+        /* 目录不可用（未配置 / 通道故障）不打扰用户 */
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  // 缓存恢复的列表若来自 lx 扩展源：等目录就绪、chip 出现后回填 source，
+  // 保证后续“继续加载更多”等请求仍走同一个扩展源通道
+  useEffect(() => {
+    if (!restoreListSource) return;
+    if (extSources.some((s) => s.key === restoreListSource)) {
+      setSource(restoreListSource as SearchSourceKey);
+      setRestoreListSource(null);
+    }
+  }, [extSources, restoreListSource]);
 
   useEffect(() => {
     return () => {
       searchAbortRef.current?.abort();
+      resolveAbortRef.current?.abort();
       directAbortRef.current?.abort();
       coverAbortRef.current?.abort();
       lyricAbortRef.current?.abort();
@@ -277,6 +509,38 @@ export default function MusicExplorer() {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
+
+  // 播放列表本地缓存：挂载时恢复最近一次搜索/解析结果，刷新后列表不销毁
+  useEffect(() => {
+    const snap = readPlaylistSnapshot();
+    if (!snap || !snap.list.length) return;
+    // 内置源 chip 直接回填；扩展源等目录加载完再回填（见 extSources effect）
+    if (SEARCH_SOURCES.some((s) => s.key === snap.source)) {
+      setSource(snap.source as SearchSourceKey);
+    } else if (snap.source) {
+      setRestoreListSource(snap.source);
+    }
+    setKeyword(snap.kw);
+    setSearchedKw(snap.kw);
+    setList(snap.list);
+    setPage(snap.page);
+    setHasMore(snap.hasMore);
+    setMusicView("playlist");
+  }, []);
+
+  // 播放列表本地缓存：列表内容 / 页号变化即写快照（list 为 null 是新请求中或切源清空，
+  // 暂不落盘；空结果 [] 则清除旧快照，避免下次刷新错误地恢复上一次的旧列表）
+  useEffect(() => {
+    if (list === null) return;
+    // 缓存恢复的列表来源 chip 尚未回填（lx 目录加载中）时先不重写快照，
+    // 等 extSources 就绪后 source 变化会触发本 effect 以正确来源落盘
+    if (restoreListSource) return;
+    if (list.length === 0) {
+      clearPlaylistSnapshot();
+      return;
+    }
+    writePlaylistSnapshot({ kw: searchedKw, source, page, hasMore, list });
+  }, [list, searchedKw, source, page, hasMore]);
 
   const showToast = (kind: "ok" | "err", text: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -357,6 +621,15 @@ export default function MusicExplorer() {
     mutedRef.current = muted;
   }, [muted]);
 
+  // 音量本地缓存：用户每次调整后写入，刷新 / 下次进入时恢复上次的音量
+  useEffect(() => {
+    try {
+      localStorage.setItem("mp-player-volume", String(volume));
+    } catch {
+      // 隐私模式等写入失败时静默降级，不影响播放
+    }
+  }, [volume]);
+
   const resetPlayer = () => {
     directAbortRef.current?.abort();
     lyricAbortRef.current?.abort();
@@ -384,6 +657,8 @@ export default function MusicExplorer() {
     if (searchAbortRef.current) searchAbortRef.current.abort();
     const controller = new AbortController();
     searchAbortRef.current = controller;
+    // 用户发起了新搜索：取消“缓存来源 chip 待回填”，以当前选择为准
+    setRestoreListSource(null);
 
     setSearching(true);
     setSearchError("");
@@ -398,9 +673,24 @@ export default function MusicExplorer() {
     try {
       const data = await requestSearchPage(source, kw, 1, controller.signal);
       if (controller.signal.aborted) return;
-      setList(data.items || []);
-      setPage(data.page || 1);
-      setHasMore(Boolean(data.hasMore));
+      const freshItems = data.items || [];
+      // 同关键词 + 同来源，且本次首页结果与缓存列表头部逐条一致：视为同一份结果，
+      // 直接沿用缓存里已累积的更完整列表（翻页过时保留深页），避免“重新搜索只剩第一页”
+      const cached = readPlaylistSnapshot();
+      if (
+        cached &&
+        cached.kw === kw &&
+        cached.source === source &&
+        isSameListHead(freshItems, cached.list)
+      ) {
+        setList(cached.list);
+        setPage(cached.page);
+        setHasMore(Boolean(cached.hasMore));
+      } else {
+        setList(freshItems);
+        setPage(data.page || 1);
+        setHasMore(Boolean(data.hasMore));
+      }
     } catch (err) {
       if (controller.signal.aborted) return;
       setSearchError(err instanceof Error ? err.message : "请求失败，请稍后重试");
@@ -412,9 +702,83 @@ export default function MusicExplorer() {
     }
   };
 
+  /**
+   * 链接解析：把平台分享链接解析为归一曲目（source+id+元数据），作为单条播放
+   * 列表插入；播放 / 下载 / 歌词 / 封面复用搜索结果的同一套链路。网易云链接当前
+   * 可直接解析到播放；QQ / 酷狗 / 酷我识别成功但直链引擎未接入时给出引导提示。
+   */
+  const runResolve = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = link.trim();
+    if (!text) {
+      setResolveError("请先粘贴歌曲分享链接");
+      return;
+    }
+    if (resolveAbortRef.current) resolveAbortRef.current.abort();
+    const controller = new AbortController();
+    resolveAbortRef.current = controller;
+    // 用户主动解析链接：取消“缓存来源 chip 待回填”，以解析产物平台为准
+    setRestoreListSource(null);
+
+    setResolving(true);
+    setResolveError("");
+    setPageErr("");
+    setList(null);
+    resetPlayer();
+    setPage(1);
+    setHasMore(false);
+
+    try {
+      const data = await requestResolve(text, controller.signal);
+      if (controller.signal.aborted) return;
+      if (data.status === "playable" && data.item) {
+        const it = data.item;
+        // 解析产物平台若与当前搜索源不一致则同步 chip，保证列表平台列 / 图标 / 直链通道一致
+        const key = it.source as SearchSourceKey;
+        if ((key === "netease" || key === "kuwo" || key === "joox") && key !== source) {
+          setSource(key);
+          setSearchError("");
+        }
+        setList([it]);
+        setHasMore(false);
+        setMusicView("playlist");
+        if (data.metadata === "fallback") {
+          showToast(
+            "ok",
+            "已就绪：详情通道暂不可用，标题以歌曲 ID 占位，仍可播放 / 下载"
+          );
+        } else {
+          showToast("ok", `已解析「${it.name}」，可试听与下载`);
+        }
+      } else if (data.status === "engine-missing") {
+        setResolveError(data.message || "该平台直链解析引擎暂未接入");
+      } else {
+        setResolveError("暂时无法解析该链接，请换一条歌曲链接试试");
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setResolveError(
+        err instanceof Error && err.message ? err.message : "解析失败，请稍后重试"
+      );
+    } finally {
+      if (resolveAbortRef.current === controller) {
+        setResolving(false);
+        resolveAbortRef.current = null;
+      }
+    }
+  };
+
   /** 追加加载下一页：结果累积进 list，配合下拉触底自动翻页，滚动位置不变 */
   const goToPage = async (targetPage: number) => {
-    if (!searchedKw || searching || targetPage < 1 || pagingRef.current) return;
+    if (
+      !searchedKw ||
+      searching ||
+      targetPage < 1 ||
+      pagingRef.current ||
+      // 缓存恢复的列表来源 chip 尚未回填（lx 目录加载中）时不抢先按默认源翻页
+      Boolean(restoreListSource)
+    )
+      return;
     if (searchAbortRef.current) searchAbortRef.current.abort();
     const controller = new AbortController();
     searchAbortRef.current = controller;
@@ -644,16 +1008,41 @@ export default function MusicExplorer() {
     setCurrentTime(t);
   };
 
-  // 点击底部播放栏的歌曲封面 → 整页歌词
+  // 收起整页歌词：先加 is-closing 触发收起动画，动画结束（延迟略长于动画时长）才真正卸载
+  const requestCloseLyric = useCallback(() => {
+    if (!lyricOpen || lyricCloseTimerRef.current) return;
+    setLyricClosing(true);
+    lyricCloseTimerRef.current = setTimeout(() => {
+      lyricCloseTimerRef.current = null;
+      setLyricClosing(false);
+      setLyricOpen(false);
+    }, 340);
+  }, [lyricOpen]);
+
+  // 组件卸载时清理收起动画定时器，避免对已卸载组件 setState
+  useEffect(
+    () => () => {
+      if (lyricCloseTimerRef.current) clearTimeout(lyricCloseTimerRef.current);
+    },
+    []
+  );
+
+  // 点击底部播放栏的歌曲封面 → 展开整页歌词（若处于收起动画中途则取消卸载）
   const openLyricPage = () => {
-    if (picked) setLyricOpen(true);
+    if (!picked) return;
+    if (lyricCloseTimerRef.current) {
+      clearTimeout(lyricCloseTimerRef.current);
+      lyricCloseTimerRef.current = null;
+    }
+    setLyricClosing(false);
+    setLyricOpen(true);
   };
 
   // 整页歌词视图下：Esc 收起、锁定背景滚动
   useEffect(() => {
     if (!lyricOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLyricOpen(false);
+      if (e.key === "Escape") requestCloseLyric();
     };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -662,7 +1051,7 @@ export default function MusicExplorer() {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [lyricOpen]);
+  }, [lyricOpen, requestCloseLyric]);
 
   // 歌曲详情弹窗下：Esc 收起、锁定背景滚动
   useEffect(() => {
@@ -710,6 +1099,7 @@ export default function MusicExplorer() {
   const switchSource = (next: SearchSourceKey) => {
     if (next === source) return;
     setSource(next);
+    setRestoreListSource(null);
     setList(null);
     setHasMore(false);
     setPage(1);
@@ -727,7 +1117,14 @@ export default function MusicExplorer() {
     setCoverLoading(false);
     if (!picked) return;
     const picId = picked.picId ?? "";
-    if (!picId) return;
+    const directPic = picked.picUrlDirect ?? "";
+    if (!picId && !directPic) return;
+
+    // 链接解析产物的封面是图床直链，直接展示，无需经 GD pic 换取
+    if (directPic) {
+      setCoverUrl(directPic);
+      return;
+    }
 
     const controller = new AbortController();
     coverAbortRef.current = controller;
@@ -771,11 +1168,16 @@ export default function MusicExplorer() {
     setPalette(null);
     if (!picked || coverFailed || !coverUrl) return;
     const picId = picked.picId ?? "";
-    if (!picId) return;
+    // 链接解析产物的封面为图床直链，无法走 GD bin 代理取色，跳过即可（直链 CORS 失败会静默回退默认配色）
+    if (!picId && !picked.picUrlDirect) return;
     const srcName = picked.source || source;
+    // 直连模式（代理不可用）下同源 bin 字节代理同样会 502，跳过它，仅尝试外部直链取色；
+    // 取不到色就回退整页歌词默认配色（不阻断功能）
     const binUrl =
-      `/api/music?action=pic&source=${encodeURIComponent(srcName)}` +
-      `&id=${encodeURIComponent(picId)}&size=300&bin=1`;
+      !picked.picUrlDirect && !!picId && !isDirectUsed()
+        ? `/api/music?action=pic&source=${encodeURIComponent(srcName)}` +
+          `&id=${encodeURIComponent(picId)}&size=300&bin=1`
+        : "";
     const controller = new AbortController();
     paletteAbortRef.current = controller;
     (async () => {
@@ -867,7 +1269,7 @@ export default function MusicExplorer() {
             <Disc3 />
             <p>播放列表还是空的</p>
             <p style={{ fontSize: 12, opacity: 0.75 }}>
-              点击左上角「发现歌曲」，搜索歌名或歌手即可在线点播
+              点击左上角「发现歌曲」，搜索歌名 / 歌手，或粘贴歌曲分享链接解析后即可点播
             </p>
           </div>
         </div>
@@ -895,6 +1297,7 @@ export default function MusicExplorer() {
             <span className="mp-ch mp-ch-artist">作者</span>
             <span className="mp-ch mp-ch-album">专辑</span>
             <span className="mp-ch mp-ch-src">平台</span>
+            <span className="mp-ch mp-ch-line">线路</span>
           </div>
         </div>
         <div
@@ -909,6 +1312,7 @@ export default function MusicExplorer() {
             const loadingThis = fetching && isCurrent && !direct;
             const isPlaying = isCurrent && playing;
             const artist = artistText(item);
+            const line = musicLineMeta(item.line);
             return (
               <div
                 key={`${item.source}-${item.id}`}
@@ -956,6 +1360,18 @@ export default function MusicExplorer() {
                   <PlatformIcon source={source} size={13} />
                   {sourceMeta.label}
                 </span>
+                <span
+                  className={cn("mp-cell", "mp-cell-line", line?.direct && "is-direct")}
+                  title={line?.title}>
+                  {line ? (
+                    <>
+                      <i className="mp-line-dot" aria-hidden="true" />
+                      <span className="mp-line-text">{line.text}</span>
+                    </>
+                  ) : (
+                    <span className="mp-line-none">—</span>
+                  )}
+                </span>
               </div>
             );
           })}
@@ -985,66 +1401,153 @@ export default function MusicExplorer() {
 
   const renderSearchPanel = () => {
     const tags = ["周杰伦", "林俊杰", "陈奕迅", "Beyond", "稻香"];
+    const searchMode = mode === "search";
+    const switchMode = (next: "search" | "resolve") => {
+      if (next === mode) return;
+      setMode(next);
+      setResolveError("");
+      setSearchError("");
+    };
     return (
       <div className="mp-scroll">
         <div className="mp-hero">
-          <h1>发现好音乐</h1>
-          <p className="mp-hero-sub">统一接入多个音源，搜索即试听，一点即下载</p>
-          <form className="mp-search-big" onSubmit={runSearch}>
-            <Search />
-            <input
-              value={keyword}
-              onChange={(e) => {
-                setKeyword(e.target.value);
-                if (searchError) setSearchError("");
-              }}
-              placeholder={`在 ${sourceMeta.label} 中搜索歌曲 / 歌手`}
-              autoComplete="off"
-            />
-            <button
-              type="submit"
-              title="搜索"
-              disabled={searching || !keyword.trim()}>
-              {searching ? <Loader2 className="mp-spin" /> : <Search />}
-            </button>
-          </form>
+          <h1>{searchMode ? "发现好音乐" : "链接直达歌曲"}</h1>
+          <p className="mp-hero-sub">
+            {searchMode
+              ? "统一接入多个音源，搜索即试听，一点即下载"
+              : "粘贴歌曲分享链接，一步解析成可试听 / 下载的曲目"}
+          </p>
 
-          <div className="mp-chiprow">
-            {SEARCH_SOURCES.map((s) => {
-              const active = source === s.key;
-              return (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => switchSource(s.key)}
-                  className={cn("mp-src-chip", active && "is-active")}
-                  style={{ "--sc": s.color } as React.CSSProperties}>
-                  <PlatformIcon source={s.key} />
-                  {s.label}
-                </button>
-              );
-            })}
+          <div className="mp-mode-seg" role="tablist" aria-label="歌曲查找方式">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={searchMode}
+              className={cn("mp-mode-btn", searchMode && "is-active")}
+              onClick={() => switchMode("search")}>
+              <Search />
+              关键词搜索
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!searchMode}
+              className={cn("mp-mode-btn", !searchMode && "is-active")}
+              onClick={() => switchMode("resolve")}>
+              <Link2 />
+              粘贴链接解析
+            </button>
           </div>
 
-          {!searching && (
-            <div className="mp-tags">
-              {tags.map((tag) => (
+          {searchMode ? (
+            <>
+              <form className="mp-search-big" onSubmit={runSearch}>
+                <Search />
+                <input
+                  value={keyword}
+                  onChange={(e) => {
+                    setKeyword(e.target.value);
+                    if (searchError) setSearchError("");
+                  }}
+                  placeholder={`在 ${sourceMeta.label} 中搜索歌曲 / 歌手`}
+                  autoComplete="off"
+                />
                 <button
-                  key={tag}
-                  type="button"
-                  className="mp-tag"
-                  onClick={() => runSearch(tag)}>
-                  {tag}
+                  type="submit"
+                  title="搜索"
+                  disabled={searching || !keyword.trim()}>
+                  {searching ? <Loader2 className="mp-spin" /> : <Search />}
                 </button>
-              ))}
-            </div>
-          )}
+              </form>
 
-          {searchError && (
-            <div className="mp-error" style={{ width: "min(520px,100%)", marginTop: 14 }}>
-              <AlertCircle />
-              <span>{searchError}</span>
-            </div>
+              <div className="mp-chiprow">
+                {sourceChips.map((s) => {
+                  const active = source === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => switchSource(s.key)}
+                      title={s.ext ? `洛雪扩展音源 · ${s.label}` : `切到 ${s.label}`}
+                      className={cn(
+                        "mp-src-chip",
+                        active && "is-active",
+                        s.ext && "mp-src-chip-ext"
+                      )}
+                      style={{ "--sc": s.color } as React.CSSProperties}>
+                      {s.ext ? (
+                        <span className="dot" aria-hidden="true" />
+                      ) : (
+                        <PlatformIcon source={s.key} />
+                      )}
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {!searching && (
+                <div className="mp-tags">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className="mp-tag"
+                      onClick={() => runSearch(tag)}>
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {searchError && (
+                <div
+                  className="mp-error"
+                  style={{ width: "min(520px,100%)", marginTop: 14 }}>
+                  <AlertCircle />
+                  <span>{searchError}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <form className="mp-search-big mp-link-form" onSubmit={runResolve}>
+                <Link2 />
+                <input
+                  value={link}
+                  onChange={(e) => {
+                    setLink(e.target.value);
+                    if (resolveError) setResolveError("");
+                  }}
+                  placeholder="粘贴歌曲分享链接，如 https://music.163.com/song?id=…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  inputMode="url"
+                />
+                <button
+                  type="submit"
+                  title="解析歌曲"
+                  disabled={resolving || !link.trim()}>
+                  {resolving ? <Loader2 className="mp-spin" /> : <Link2 />}
+                </button>
+              </form>
+
+              <p className="mp-resolve-tip">
+                支持：<strong>网易云音乐</strong> 歌曲链接直接解析播放；
+                <span className="dim">
+                  QQ音乐 / 酷狗 / 酷我 歌曲链接可识别，直链引擎接入后开放
+                </span>
+              </p>
+
+              {resolveError && (
+                <div
+                  className="mp-error"
+                  style={{ width: "min(560px,100%)", marginTop: 12 }}>
+                  <AlertCircle />
+                  <span>{resolveError}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1140,20 +1643,33 @@ export default function MusicExplorer() {
           {copied ? <Check /> : <Copy />}
         </button>
         {direct ? (
-          <a
-            className="mp-icon-btn"
-            href={`/api/music?${new URLSearchParams({
-              source: picked?.source || source,
-              id: picked?.urlId || picked?.id || direct.id,
-              br,
-              bin: "1",
-              title: picked?.name || "",
-            })}`}
-            download
-            title="下载歌曲"
-            aria-label="下载歌曲">
-            <Download />
-          </a>
+          isDirectUsed() ? (
+            // 直连模式（代理对上游不可用）：同源 bin 代理同样不可用，改为新标签打开源文件
+            <a
+              className="mp-icon-btn"
+              href={direct.url}
+              target="_blank"
+              rel="noreferrer"
+              title="下载歌曲（直连：新标签页打开源文件后另存）"
+              aria-label="下载歌曲">
+              <Download />
+            </a>
+          ) : (
+            <a
+              className="mp-icon-btn"
+              href={`/api/music?${new URLSearchParams({
+                source: picked?.source || source,
+                id: picked?.urlId || picked?.id || direct.id,
+                br,
+                bin: "1",
+                title: picked?.name || "",
+              })}`}
+              download
+              title="下载歌曲"
+              aria-label="下载歌曲">
+              <Download />
+            </a>
+          )
         ) : (
           <button type="button" className="mp-icon-btn" disabled title="下载歌曲">
             <Download />
@@ -1179,6 +1695,31 @@ export default function MusicExplorer() {
       !list ||
       currentIndex == null ||
       (!hasMore && currentIndex >= (list?.length ?? 0) - 1);
+    // 底栏第二行：歌手行在歌词可用时顶替为「当前歌词句」。
+    // 歌名已并入主行显示为「歌名 - 歌手」，因此歌词不可用时不丢任何信息。
+    const renderMiniLyric = () => {
+      if (!picked) {
+        return <div className="a">选择一首歌曲开始聆听</div>;
+      }
+      const active =
+        lyricLines && activeLyricIndex >= 0 ? lyricLines[activeLyricIndex] : null;
+      const activeText = active && active.text.trim() ? active.text : "";
+      if (activeText) {
+        return <MiniLyricLine text={activeText} playing={playing} />;
+      }
+      if (lyricsLoading) {
+        return <div className="a">歌词加载中…</div>;
+      }
+      if (lyricError) {
+        return <div className="a">歌词暂不可用</div>;
+      }
+      // 无歌词，或已拿到歌词但还没播到第一句（前奏）：占位保持双行结构，避免底栏跳动
+      return (
+        <div className="a">
+          {lyricLines && lyricLines.length > 0 ? "· · ·" : "暂无歌词"}
+        </div>
+      );
+    };
     const progGrad = `linear-gradient(to right, var(--mp-primary) 0%, var(--mp-primary) ${progressPercent}%, var(--mp-line) ${progressPercent}%, var(--mp-line) 100%)`;
     const volGrad = `linear-gradient(to right, var(--mp-primary) 0%, var(--mp-primary) ${volumePercent}%, var(--mp-line) ${volumePercent}%, var(--mp-line) 100%)`;
     // 悬停气泡：滑块圆心的横向位置 = 在“去掉圆点宽后的可用区间”内按比例映射，
@@ -1191,13 +1732,38 @@ export default function MusicExplorer() {
       const hi = pbarW - tipBubbleW - 4 - thumbX;
       tipDx = Math.min(Math.max(-tipBubbleW / 2, lo), hi);
     }
+    // 进度条命中层（.mp-pbar-hit）统一把指针横向位置换算为播放时间并 seek。
+    // 这样点击/拖动不再受原生 range 3px 细条热区限制，按“加粗后”的整块区域触发。
+    const seekToClientX = (clientX: number) => {
+      const el = pbarRef.current;
+      if (!el || !duration) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      seek(ratio * duration);
+    };
+    // 底栏空白区域（曲目信息列留白 / 三栏间隙等）点击也唤起整页歌词；
+    // 命中交互控件（按钮 / 滑杆 / 音质选择器等）时不触发，避免误开歌词页。
+    const openLyricFromBlank = (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as Element;
+      if (
+        target.closest(
+          "button, a, input, select, textarea, [role='slider'], .mp-brp"
+        )
+      ) {
+        return;
+      }
+      openLyricPage();
+    };
     return (
       <div className="mp-player">
         <div
           ref={pbarRef}
-          className="mp-pbar"
+          className={cn("mp-pbar", progHover && "is-hot")}
+          style={{ "--mp-prog": progGrad } as React.CSSProperties}
           onMouseEnter={() => setProgHover(true)}
           onMouseLeave={() => setProgHover(false)}>
+          {/* 原生 range 仅保留可视轨道/滑块与键盘操作；鼠标/触屏由 .mp-pbar-hit 接管 */}
           <input
             type="range"
             className="mp-progress"
@@ -1206,13 +1772,29 @@ export default function MusicExplorer() {
             step={0.1}
             value={currentTime}
             disabled={!duration}
-            onMouseDown={() => setSeeking(true)}
-            onMouseUp={() => setSeeking(false)}
-            onTouchStart={() => setSeeking(true)}
-            onTouchEnd={() => setSeeking(false)}
             onInput={(e) => seek(Number(e.currentTarget.value))}
-            style={{ "--mp-prog": progGrad } as React.CSSProperties}
             aria-label="播放进度"
+          />
+          {/* 命中层：高度扩到“悬停加粗后”的区域，进入该区即可触发加粗/气泡，点按即 seek */}
+          <div
+            className="mp-pbar-hit"
+            aria-hidden="true"
+            onMouseEnter={() => setProgHover(true)}
+            onMouseLeave={() => setProgHover(false)}
+            onPointerDown={(e) => {
+              if (!duration) return;
+              setSeeking(true);
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+              seekToClientX(e.clientX);
+            }}
+            onPointerMove={(e) => {
+              if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+                seekToClientX(e.clientX);
+              }
+            }}
+            onPointerUp={() => setSeeking(false)}
+            onPointerCancel={() => setSeeking(false)}
+            onLostPointerCapture={() => setSeeking(false)}
           />
           {progHover && picked && duration > 0 && (
             <span
@@ -1224,13 +1806,19 @@ export default function MusicExplorer() {
                 style={
                   tipDx != null ? { transform: `translateX(${tipDx}px)` } : undefined
                 }>
-                {formatTime(currentTime)}
+                <span className="mp-prog-tip-cur">
+                  {formatTime(currentTime)}
+                </span>
+                <span className="mp-prog-tip-sep">/</span>
+                <span className="mp-prog-tip-dur">
+                  {formatTime(duration)}
+                </span>
               </span>
               <span className="mp-prog-tip-arrow" />
             </span>
           )}
         </div>
-        <div className="mp-prow">
+        <div className="mp-prow" onClick={openLyricFromBlank}>
           <div className="mp-ptrack">
             <button
               type="button"
@@ -1254,8 +1842,12 @@ export default function MusicExplorer() {
               </span>
             </button>
             <div className="c">
-              <div className="t">{picked ? picked.name : "未在播放"}</div>
-              <div className="a">{picked ? artistText(picked) : "选择一首歌曲开始聆听"}</div>
+              <div
+                className="t"
+                title={picked ? `${picked.name} - ${artistText(picked)}` : undefined}>
+                {picked ? `${picked.name} - ${artistText(picked)}` : "未在播放"}
+              </div>
+              {renderMiniLyric()}
             </div>
           </div>
 
@@ -1335,7 +1927,12 @@ export default function MusicExplorer() {
                 aria-label="音量"
               />
             </div>
-            <span className="total">{formatTime(duration)}</span>
+            <span
+              className="mp-volpct"
+              title={muted || volume === 0 ? "已静音" : "当前音量"}
+              aria-label="当前音量">
+              {Math.round((muted ? 0 : volume) * 100)}%
+            </span>
           </div>
         </div>
       </div>
@@ -1629,6 +2226,7 @@ export default function MusicExplorer() {
       currentIndex == null ||
       (!hasMore && currentIndex >= (list?.length ?? 0) - 1);
     const progGrad = `linear-gradient(to right, var(--mp-primary) 0%, var(--mp-primary) ${progressPercent}%, var(--mp-line) ${progressPercent}%, var(--mp-line) 100%)`;
+    const volGrad = `linear-gradient(to right, var(--mp-primary) 0%, var(--mp-primary) ${muted ? 0 : volumePercent}%, var(--mp-line) ${muted ? 0 : volumePercent}%, var(--mp-line) 100%)`;
     type MpCssVars = React.CSSProperties & Record<`--mplp-${string}`, string>;
     const palVars: MpCssVars = palette
       ? {
@@ -1648,11 +2246,36 @@ export default function MusicExplorer() {
         }
       : {};
 
+    // 收起：与“点底栏空白展开”形成往返呼应——整页歌词铺满时，主底栏不可点，
+    // 因此在歌词页最底部划一条与底栏等高的“空带”，点空白处即沿来路回落收起。
+    // 仅命中视口最底 ~78px 且未落在任何控件/歌词正文（左信息列、右歌词列等）上才生效，
+    // 避免点击歌词行跳转、拖进度条时误收起。
+    const closeLyricFromBottom = (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as Element;
+      if (
+        target.closest(
+          "button, a, input, select, textarea, [role='slider'], .mplp-left, .mplp-right"
+        )
+      ) {
+        return;
+      }
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      if (e.clientY < vh - 78) return;
+      requestCloseLyric();
+    };
+
     return (
       <div
-        className={cn("mp-lyricpage", palette && "has-palette")}
+        className={cn(
+          "mp-lyricpage",
+          palette && "has-palette",
+          lyricClosing && "is-closing",
+          !playing && "is-vinyl-paused"
+        )}
         role="dialog"
         aria-modal="true"
+        aria-hidden={lyricClosing || undefined}
+        onClick={closeLyricFromBottom}
         aria-label={`${picked.name} 整页歌词`}
         style={{ "--mp-acc": sourceMeta.color, ...palVars } as React.CSSProperties}>
         <div
@@ -1668,7 +2291,7 @@ export default function MusicExplorer() {
           <button
             type="button"
             className="mplp-collapse"
-            onClick={() => setLyricOpen(false)}
+            onClick={requestCloseLyric}
             aria-label="收起整页歌词"
             title="收起歌词">
             <ChevronDown />
@@ -1762,6 +2385,38 @@ export default function MusicExplorer() {
                 title={loop ? "单曲循环已开启" : "单曲循环"}>
                 <Repeat />
               </button>
+              <div className="mplp-vol">
+                <button
+                  type="button"
+                  className={cn("mp-icon-btn", (muted || volume === 0) && "on")}
+                  onClick={() => setMuted((m) => !m)}
+                  aria-label={muted ? "取消静音" : "静音"}
+                  aria-pressed={muted}
+                  title={muted ? "取消静音" : "静音"}>
+                  {muted || volume === 0 ? <VolumeX /> : <Volume2 />}
+                </button>
+                <div className="mplp-volpop" role="group" aria-label="音量调节">
+                  <span className="mplp-volbar">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={muted ? 0 : volume}
+                      onInput={(e) => {
+                        const v = Number(e.currentTarget.value);
+                        setVolume(v);
+                        if (v > 0) setMuted(false);
+                      }}
+                      style={{ "--mp-prog": volGrad } as React.CSSProperties}
+                      aria-label="音量"
+                    />
+                  </span>
+                  <span className="mplp-volpct">
+                    {Math.round((muted ? 0 : volume) * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 

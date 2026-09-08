@@ -299,6 +299,14 @@
   font-weight: 600;
   box-shadow: 0 3px 12px color-mix(in srgb, var(--sc, var(--mp-primary)) 16%, transparent);
 }
+/* lx 脚本扩展源 chip：无品牌 logo，用虚线边与彩色圆点与内置源区分 */
+.mp-src-chip.mp-src-chip-ext { border-style: dashed; }
+.mp-src-chip.mp-src-chip-ext.is-active { border-style: solid; }
+.mp-src-chip.mp-src-chip-ext .dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--sc) 70%, transparent);
+}
 
 .mp-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
 .mp-tag {
@@ -319,9 +327,9 @@
    列头下方直接透出父级 .mp-app 背景，与四周颜色天然一致，仅留一条下边框。 */
 .mp-list { display: flex; flex-direction: column; gap: 2px; }
 
-/* 列模板：序号 | 歌名(含播放态) | 作者 | 专辑 | 平台 */
+/* 列模板：序号 | 歌名(含播放态) | 作者 | 专辑 | 平台 | 线路 */
 :root {
-  --mp-cols: 30px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.2fr) 100px;
+  --mp-cols: 30px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.2fr) 100px 128px;
 }
 
 /* 列头栏：左右留白与 .mp-scroll 的水平 padding 对齐，保证列宽与行对齐 */
@@ -464,6 +472,32 @@
 .mp-cell-src .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sc, var(--text-muted)); flex: none; }
 .mp-cell-src svg,
 .mp-cell-src img { flex: none; }
+
+/* 线路列：标注本页结果取回通道（同源代理命中哪个上游基址 / 浏览器直连），多页翻页时各行可能不同 */
+.mp-cell-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.mp-cell-line .mp-line-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mp-primary);
+}
+.mp-cell-line.is-direct .mp-line-dot { background: var(--success); }
+.mp-cell-line .mp-line-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-cell-line .mp-line-none { opacity: 0.5; }
 
 /* 列表底部：自动加载 / 到底 / 出错提示 */
 .mp-loadmore {
@@ -770,6 +804,10 @@
   -webkit-appearance: none;
   background: transparent;
   cursor: pointer;
+  /* 让原生滑块（轨道 + 拇指）画在 ::before 加粗层之上；
+     否则底色层会盖住滑块本身，thumb 看起来被"切掉一半"。 */
+  position: relative;
+  z-index: 1;
 }
 .mp-progress::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: var(--mp-prog, var(--mp-line)); }
 .mp-progress::-webkit-slider-thumb {
@@ -794,10 +832,53 @@
 }
 .mp-player:hover .mp-progress::-moz-range-thumb { opacity: 1; }
 
-/* 进度条悬停时显示当前播放时间
+/* 鼠标悬停进度条：改用 .mp-pbar::before 独立绘制层做对称加粗。
+   原生 range 内部伪元素的对齐行为在不同浏览器里不一致：负 margin-top 能移动
+   input 盒模型，但轨道/拇指仍以原顶边为基准向下扩，导致视觉只往下长。
+   这里换成我们完全可控的 ::before 层：以 3px 细线中心为 transform-origin
+   做 scaleY（3 → 7），上下两端等高外扩、中心点不动；.mp-pbar 固定 3px，
+   底栏行高不受影响；pointer-events:none 不抢命中区，input 仍以 z:1 压在层上
+   保证 thumb 显示在加粗层之上。 */
+.mp-pbar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mp-prog, var(--mp-line));
+  transform-origin: center;
+  transform: scaleY(1);
+  transition: transform 0.12s ease;
+  pointer-events: none;
+}
+.mp-pbar:hover::before,
+.mp-pbar:active::before,
+.mp-pbar.is-hot::before { transform: scaleY(2.3334); }
+
+/* .mp-pbar 固定为细线高度：加粗走 ::before 独立层，不改动底栏行高 */
+.mp-pbar { position: relative; height: 3px; }
+
+/* 进度条命中层：容器虽仅 3px，但鼠标命中高度扩到「悬停加粗后」的区域——
+   进入加粗后线条会占据的范围即触发 :hover 加粗与时间气泡，无需精准压在
+   原始 3px 细线上。层以 3px 细线为轴上下等距悬浮（z 盖过原生 range），
+   点击/拖动 seek 由 JS 换算横向坐标，键盘调节仍走原生 input。 */
+.mp-pbar-hit {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 9px;
+  transform: translateY(-50%);
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* 进度条悬停时显示「当前播放 / 总时长」气泡
    .mp-prog-tip 为 0 宽“锚点列”，其 left 由 JS 精确落在滑块圆心；
    箭头与气泡均以此为参照，保证箭头尖始终对准圆心，气泡过宽时向两侧让位。 */
-.mp-pbar { position: relative; }
 .mp-prog-tip {
   position: absolute;
   top: -32px;
@@ -833,6 +914,11 @@
   border-right: 4px solid transparent;
   border-top: 5px solid rgba(18, 18, 24, 0.82);
 }
+
+/* 气泡内：已播时长加重、分隔符弱化、总时长半透明 */
+.mp-prog-tip-cur { font-weight: 600; }
+.mp-prog-tip-sep { margin: 0 4px; opacity: 0.55; }
+.mp-prog-tip-dur { opacity: 0.72; }
 
 .mp-prow {
   display: grid;
@@ -870,6 +956,42 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 底部栏单行实时歌词（顶替歌手行，不改变底栏高度）：
+   始终与上方标题保持同一左边缘（不随文本长短居中）；
+   超长且正在播放时无缝跑马灯；超长但暂停时退化为省略号。 */
+.mp-lymq {
+  position: relative;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-align: left;
+}
+.mp-lymq .mp-lymq-txt {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-lymq .mp-lymq-track {
+  display: inline-flex;
+  white-space: nowrap;
+  will-change: transform;
+  animation: mp-lymq-scroll 12s linear infinite;
+}
+.mp-lymq .mp-lymq-copy { padding-right: 44px; }
+.mp-lymq .mp-lymq-probe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+@keyframes mp-lymq-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
 .mp-ptrack .mp-like { margin-left: 2px; flex: none; width: 28px; height: 28px; }
 .mp-ptrack .mp-like svg { width: 15px; height: 15px; }
 
@@ -895,7 +1017,15 @@
 .mp-ctrls .mp-icon-btn svg { width: 19px; height: 19px; }
 
 .mp-ptime { text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
-.mp-ptime .total { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mp-ptime .mp-volpct {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 32px;
+  text-align: right;
+  cursor: default;
+}
 .mp-vol { display: flex; align-items: center; gap: 5px; margin: 0 8px; }
 .mp-vol svg { width: 17px; height: 17px; color: var(--text-secondary); cursor: pointer; }
 .mp-vol input {
@@ -934,7 +1064,7 @@
 }
 /* 小屏适配 */
 @media (max-width: 1080px) {
-  :root { --mp-cols: 30px minmax(0, 1.6fr) minmax(0, 1fr) 100px; }
+  :root { --mp-cols: 30px minmax(0, 1.6fr) minmax(0, 1fr) 100px 128px; }
   .mp-cell-album,
   .mp-colhead .mp-ch-album { display: none; }
 }
@@ -955,6 +1085,8 @@
   .mp-row { gap: 8px; padding-left: 8px; padding-right: 8px; }
   .mp-colhead .mp-ch-artist { display: none; }
   .mp-row .mp-cell-artist { display: none; }
+  .mp-colhead .mp-ch-line,
+  .mp-cell-line { display: none; }
   .mp-side {
     order: -1;
     width: 100%;
@@ -992,11 +1124,58 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--background);
-  animation: mplp-in 0.3s cubic-bezier(0.22, 0.8, 0.2, 1);
+  /* 展开动画：整页如同一张“底部面板”自底栏方向向上推起铺满全屏（sheet 式），
+     收起时沿同一轴回落淡出。transform-origin 指向底部播放条，方向感更贴合
+     “从封面展开 / 落回播放器”的操作来源。 */
+  transform-origin: 50% 100%;
+  animation: mplp-rise 0.42s cubic-bezier(0.2, 0.9, 0.25, 1);
 }
-@keyframes mplp-in {
-  from { opacity: 0; transform: translateY(34px); }
+@keyframes mplp-rise {
+  from { opacity: 0; transform: translateY(100%); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* 收起阶段：JS 先加 .is-closing 触发本动画（关闭交互），
+   约 340ms 后才会真正卸载 DOM，避免“瞬间消失”。 */
+.mp-lyricpage.is-closing {
+  pointer-events: none;
+  animation: mplp-fall 0.3s cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+@keyframes mplp-fall {
+  0% { opacity: 1; transform: translateY(0); }
+  62% { opacity: 0.9; transform: translateY(76%); }
+  100% { opacity: 0; transform: translateY(100%); }
+}
+
+/* 展开时内容错峰上浮：收起箭头 → 左侧封面区 → 右侧歌词，营造层次纵深。
+   animation-fill-mode: backwards 让延迟等待期保持 from 状态；动画被禁用时
+   不依赖任何持久 opacity/transform，内容照常显示。 */
+.mplp-head { animation: mplp-lift 0.34s cubic-bezier(0.25, 0.8, 0.3, 1) 0.1s backwards; }
+.mplp-left { animation: mplp-lift 0.4s cubic-bezier(0.25, 0.8, 0.3, 1) 0.16s backwards; }
+.mplp-right { animation: mplp-lift 0.44s cubic-bezier(0.25, 0.8, 0.3, 1) 0.22s backwards; }
+@keyframes mplp-lift {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 封面再叠一层轻微放大浮现，是整页展开时最吸引视线的元素 */
+.mplp-cover { animation: mplp-pop 0.5s cubic-bezier(0.32, 1.35, 0.42, 1) 0.24s backwards; }
+@keyframes mplp-pop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* 用户偏好减弱动态效果：跳过展开/收起与内容错峰动画 */
+@media (prefers-reduced-motion: reduce) {
+  .mp-lyricpage,
+  .mp-lyricpage .mplp-head,
+  .mp-lyricpage .mplp-left,
+  .mp-lyricpage .mplp-right,
+  .mp-lyricpage .mplp-cover,
+  .mp-lyricpage .mplp-cover img,
+  .mp-lyricpage .mplp-cover .ph {
+    animation: none !important;
+  }
+  .mp-lyricpage.is-closing { opacity: 0; }
 }
 
 .mplp-bg {
@@ -1057,6 +1236,34 @@
   color: var(--mplp-fg);
 }
 
+/* 未从封面提取到色系（封面缺失 / 采样失败 / 尚未就绪）时的兜底观感：
+   不随外层亮暗主题漂移，固定为「浅黑背景 + 白色字体」的经典歌词页形态。
+   局部覆盖 .mp-lyricpage 子树用到的主题令牌，保证弹层/描边等都以白系呈现。 */
+.mp-lyricpage:not(.has-palette) {
+  background:
+    radial-gradient(
+      1100px 560px at 50% -18%,
+      color-mix(in srgb, var(--mp-acc, #335eea) 13%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(178deg, #1b1b1f 0%, #0c0c0f 100%);
+  --background: #121216;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.82);
+  --text-muted: rgba(255, 255, 255, 0.55);
+  --border-subtle: rgba(255, 255, 255, 0.14);
+  --border-medium: rgba(255, 255, 255, 0.26);
+  --mp-line: rgba(255, 255, 255, 0.22);
+  --mp-divider: rgba(255, 255, 255, 0.13);
+  --mp-soft: rgba(255, 255, 255, 0.08);
+  --mp-hover: rgba(255, 255, 255, 0.1);
+  --mp-row-hover: rgba(255, 255, 255, 0.06);
+  --mp-muted: rgba(255, 255, 255, 0.5);
+  --glass-1: rgba(255, 255, 255, 0.06);
+  --glass-2: rgba(255, 255, 255, 0.1);
+  --glass-3: rgba(255, 255, 255, 0.16);
+}
+
 .mplp-head {
   flex: none;
   display: flex;
@@ -1104,24 +1311,100 @@
   gap: 18px;
   min-width: 0;
 }
+/* 黑胶唱盘：整页封面做圆盘。盘身是深色渐变 + 细密同心纹（::before），
+   封面按圆形“盘标”居中（播放时匀速旋转），静态高光（::after）留在原处，
+   作为视觉上“盘在转”的光感参照。暂停时整盘停转。 */
 .mplp-cover {
   width: min(70%, 320px);
   aspect-ratio: 1 / 1;
-  border-radius: 18px;
+  border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(150deg, var(--glass-3), var(--glass-2));
-  box-shadow: 0 26px 70px color-mix(in srgb, var(--text-primary) 24%, transparent);
   position: relative;
+  background: radial-gradient(
+    circle at 50% 36%,
+    #3d4046 0%,
+    #232529 16%,
+    #101114 42%,
+    #000 72%,
+    #0e1013 100%
+  );
+  box-shadow:
+    0 26px 70px color-mix(in srgb, var(--text-primary) 26%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 0 30px rgba(0, 0, 0, 0.55);
 }
-.mplp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 唱片纹路：细密同心环，铺在盘身外圈（盘标旋转肉眼可见，纹路旋转近乎不变） */
+.mplp-cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: repeating-radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0) 1.3px,
+    rgba(255, 255, 255, 0.022) 1.5px,
+    rgba(255, 255, 255, 0) 2.8px
+  );
+}
+/* 封面（黑胶中心圆标）与无封面占位符共用同一圆盘尺寸，播放时匀速旋转 */
+.mplp-cover img,
 .mplp-cover .ph {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 11.5%;
+  left: 11.5%;
+  width: 77%;
+  height: 77%;
+  z-index: 1;
+  border-radius: 50%;
+  animation: mplp-vinyl 16s linear infinite;
+}
+.mplp-cover img { object-fit: cover; display: block; }
+.mplp-cover .ph {
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--text-secondary);
+  background:
+    radial-gradient(
+      circle at 50% 32%,
+      color-mix(in srgb, var(--text-primary) 7%, transparent),
+      transparent 68%
+    ),
+    color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
-.mplp-cover .ph svg { width: 64px; height: 64px; opacity: 0.45; }
+.mplp-cover .ph svg { width: 58px; height: 58px; opacity: 0.5; }
+/* 静态高光：模拟盘面反光，光源固定 → 盘转动时高光位置不变，强化旋转感知 */
+.mplp-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.03) 24%,
+      transparent 40%
+    ),
+    linear-gradient(
+      295deg,
+      transparent 62%,
+      rgba(255, 255, 255, 0.04) 84%,
+      rgba(255, 255, 255, 0.1) 100%
+    );
+}
+/* 暂停播放时黑胶停转（页面根加 .is-vinyl-paused） */
+.mp-lyricpage.is-vinyl-paused .mplp-cover img,
+.mp-lyricpage.is-vinyl-paused .mplp-cover .ph {
+  animation-play-state: paused;
+}
+@keyframes mplp-vinyl {
+  to { transform: rotate(360deg); }
+}
 .mplp-info { text-align: center; max-width: 100%; }
 .mplp-info .t { font-size: 22px; font-weight: 800; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mplp-info .a { font-size: 14px; color: var(--text-muted); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1132,6 +1415,113 @@
 .mplp-ctrls .mp-play { width: 52px; height: 52px; }
 .mplp-ctrls .mp-play svg { width: 22px; height: 22px; }
 .mplp-ctrls .mp-icon-btn svg { width: 22px; height: 22px; }
+
+/* 整页歌词：单曲循环按钮右侧的音量控制。
+   点击音量图标切换静音；悬停/聚焦（含键盘 Tab 到图标或滑杆）时在图标上方
+   浮出「纵向滑杆 + 百分比」，可精确调节音量（整页歌词盖住底栏，需自带音量调节）。
+   浮层用玻璃质感：--glass-* 半透明白渐变 + 强 blur/saturate 磨砂，
+   背后的封面/文字会被晕开成柔光（无边缘高光，仅保留极淡描边）。
+   visibility 控制隐藏态：不可见时不可聚焦、读屏不读出，避免产生幽灵 Tab 点。 */
+.mplp-vol { position: relative; display: inline-flex; align-items: center; }
+.mplp-volpop {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  padding: 8px 7px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--glass-3) 40%, transparent),
+    color-mix(in srgb, var(--glass-2) 82%, transparent) 55%,
+    color-mix(in srgb, var(--glass-2) 55%, transparent)
+  );
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(0, 4px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0s linear 0.14s;
+}
+.mplp-vol:hover .mplp-volpop,
+.mplp-vol:focus-within .mplp-volpop {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(0, 0);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0s;
+}
+/* 纵向滑杆：range 本身保持水平，在定高容器内整体逆时针旋转 90°，
+   使最小值(0/静音)落在底部、最大值落在顶部，向上拖动即增大音量。 */
+.mplp-volbar {
+  position: relative;
+  width: 18px;
+  height: 100px;
+  flex: none;
+}
+.mplp-volbar input {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 3px;
+  margin: 0;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  background: transparent;
+}
+.mplp-volbar input::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mp-prog, var(--mp-line));
+}
+.mplp-volbar input::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mp-prog, var(--mp-line));
+}
+.mplp-volbar input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--mp-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  /* 相对 3px 高的轨道垂直居中：(12 - 3) / 2 */
+  margin-top: -4.5px;
+}
+.mplp-volbar input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--mp-primary);
+}
+.mplp-volpct {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: center;
+  white-space: nowrap;
+}
 
 .mplp-right {
   flex: 1 1 0;
@@ -1204,7 +1594,7 @@
     max-width: none;
     gap: 10px;
   }
-  .mplp-cover { width: 160px; border-radius: 14px; }
+  .mplp-cover { width: 160px; border-radius: 50%; }
   .mplp-cover .ph svg { width: 44px; height: 44px; }
   .mplp-info { margin-top: 0; }
   .mplp-info .t { font-size: 18px; }
@@ -1474,3 +1864,50 @@
   outline-offset: 2px;
 }
 .mp-info-copybtn svg { width: 14px; height: 14px; }
+
+/* ============================================================
+   发现歌曲页「查找方式」二级切换：关键词搜索 / 粘贴链接解析
+   ============================================================ */
+.mp-mode-seg {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--glass-2);
+}
+.mp-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mp-mode-btn svg { width: 15px; height: 15px; }
+.mp-mode-btn:hover { color: var(--text-primary); }
+.mp-mode-btn.is-active {
+  background: var(--mp-primary);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--mp-primary) 35%, transparent);
+}
+.mp-mode-btn:focus-visible { outline: 2px solid var(--mp-primary); outline-offset: 2px; }
+.mp-link-form input::placeholder { color: var(--text-muted); }
+.mp-resolve-tip {
+  max-width: 560px;
+  margin: 2px auto 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+.mp-resolve-tip strong { color: var(--mp-primary); font-weight: 600; }
+.mp-resolve-tip .dim { opacity: 0.82; }

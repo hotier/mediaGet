@@ -5,8 +5,10 @@
  * - 时间 / 大小格式化
  */
 
-/** 当前开放关键词搜索的 source（netease / kuwo / joox，对齐 /api/music 后端契约） */
-export type SearchSourceKey = "netease" | "kuwo" | "joox";
+/** 当前开放关键词搜索的 source（netease / kuwo / joox，对齐 /api/music 后端契约）。
+ *  配置洛雪(lx-music)生态音源脚本后，会额外出现脚本声明的扩展源 key（如 qsvip / qdy），
+ *  因此保留内置字面量提示的同时允许任意字符串。 */
+export type SearchSourceKey = "netease" | "kuwo" | "joox" | (string & {});
 
 export interface SearchSource {
   key: SearchSourceKey;
