@@ -76,6 +76,10 @@ function fmt(rgb: Rgb): string {
 function loadImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    // 以 CORS 模式请求外部 CDN 封面：未声明 crossOrigin 时图片会按 no-cors 加载，
+    // 即便服务器返回了 ACAO 头，绘制到画布后仍视为跨域污染，getImageData 必然抛错。
+    // 设 anonymous 后：CDN 放行（ACAO:*）→ 可取色；不放行 → onerror 走同源字节代理回退。
+    img.crossOrigin = "anonymous";
     const onAbort = () => {
       cleanup();
       reject(new DOMException("aborted", "AbortError"));
