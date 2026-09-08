@@ -258,6 +258,72 @@ function MiniLyricLine({ text, playing }: MiniLyricLineProps) {
   );
 }
 
+interface MarqueeTextProps {
+  text: string;
+  /** 追加到行容器的类名（如 .t / .a，继承既有字号配色与基础观感） */
+  className?: string;
+  /** 启用测量与跑马灯；false 时退化为普通截断显示（桌面端无需滚动） */
+  animate?: boolean;
+}
+
+/**
+ * 通用「超长文本无缝跑马灯」行：
+ * - 文本未超宽时保持父级对齐（通常居中）静态显示；
+ * - 文本超宽且 animate=true 时切换为双副本无缝滚动，动画时长随长度自适应；
+ * - animate=false 时用省略号截断（兜底，维持原静态观感）。
+ * 宽度用隐藏测量副本判定：nowrap 下其 offsetWidth 即文本自然宽度。
+ */
+function MarqueeText({ text, className, animate = true }: MarqueeTextProps) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const probeRef = useRef<HTMLSpanElement | null>(null);
+  const [overflow, setOverflow] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!animate) {
+      setOverflow(false);
+      return;
+    }
+    const row = rowRef.current;
+    const probe = probeRef.current;
+    if (!row || !probe) return;
+    const update = () => {
+      if (!rowRef.current || !probeRef.current) return;
+      // +1px 容差：贴边不视为溢出，避免像素级抖动
+      setOverflow(probeRef.current.offsetWidth > rowRef.current.clientWidth + 1);
+    };
+    update();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(update);
+      ro.observe(row);
+      return () => ro.disconnect();
+    }
+  }, [text, animate]);
+
+  const run = animate && overflow;
+  // 动画时长随文本长度放大（8~20s）：短句不至于瞬移，长句不会过快
+  const dur = Math.max(8, Math.min(20, Math.round(text.length * 0.3)));
+  return (
+    <div ref={rowRef} className={cn("mplp-mqrow", className, run && "mq")}>
+      {run ? (
+        <span
+          className="mplp-mqtrk"
+          style={{ animationDuration: `${dur}s` }}>
+          <span className="mplp-mqcp">{text}</span>
+          <span className="mplp-mqcp" aria-hidden="true">
+            {text}
+          </span>
+        </span>
+      ) : (
+        <span className="mplp-mqtx">{text}</span>
+      )}
+      {/* 隐藏测量副本：不参与布局，仅提供文本自然宽度 */}
+      <span ref={probeRef} className="mplp-mqprobe" aria-hidden="true">
+        {text}
+      </span>
+    </div>
+  );
+}
+
 /** 播放列表会话快照（localStorage 单份 JSON）：最近一次搜索结果（含已翻页累积）。
  * 目的：刷新不摧毁列表；同一关键词 + 来源再次搜索，若首页结果与缓存头部一致，
  * 视为同一份结果，直接沿用缓存里更完整的累积列表，避免重新搜索后只剩第一页。 */
@@ -422,6 +488,10 @@ export default function MusicExplorer() {
   );
   /** 轻提示（音质切换成功 / 失败等），2.5s 自动消失 */
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  /** 移动端视口（≤700px）判定：迷你播放条 /「正在播放」整页采用独立移动形态 */
+  const [isMobile, setIsMobile] = useState(false);
+  /** 移动端正在播放页当前视图：true = 唱片封面，false = 歌词（桌面端整页歌词不受影响） */
+  const [npViewCover, setNpViewCover] = useState(true);
 
   const searchAbortRef = useRef<AbortController | null>(null);
   const resolveAbortRef = useRef<AbortController | null>(null);
@@ -434,6 +504,12 @@ export default function MusicExplorer() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 整页歌词收起动画结束后延迟卸载的定时器 */
   const lyricCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 底部迷你播放条 / 正在播放页根节点 ref（移动端手势用） */
+  const miniPlayerRef = useRef<HTMLDivElement | null>(null);
+  const lyricPageRef = useRef<HTMLDivElement | null>(null);
+  /** 手势监听 effect 闭包中获取最新的展开/收起实现 */
+  const openLyricRef = useRef<() => void>(() => {});
+  const closeLyricRef = useRef<() => void>(() => {});
   /** 音质热切换时旧直链的播放位置（秒），新源就绪后从该处续播 */
   const resumeAtRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1034,9 +1110,20 @@ export default function MusicExplorer() {
       clearTimeout(lyricCloseTimerRef.current);
       lyricCloseTimerRef.current = null;
     }
+    // 若在「下拉拖拽收起」中途再次展开，先清掉手势遗留的位移与样式
+    const el = lyricPageRef.current;
+    if (el) {
+      el.classList.remove("is-drag-close");
+      el.style.transition = "";
+      el.style.transform = "";
+    }
     setLyricClosing(false);
     setLyricOpen(true);
   };
+
+  // 手势回调引用指向最新实现（effect 内部不依赖组件函数闭包）
+  openLyricRef.current = openLyricPage;
+  closeLyricRef.current = requestCloseLyric;
 
   // 整页歌词视图下：Esc 收起、锁定背景滚动
   useEffect(() => {
@@ -1052,6 +1139,132 @@ export default function MusicExplorer() {
       document.body.style.overflow = prevOverflow;
     };
   }, [lyricOpen, requestCloseLyric]);
+
+  // 移动端视口跟随（≤700px 触发迷你条 / 正在播放整页形态）
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 700px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", update);
+      return () => mq.removeEventListener("change", update);
+    }
+    // 旧版 Safari 回退
+    mq.addListener(update);
+    return () => mq.removeListener(update);
+  }, []);
+
+  // 每次展开正在播放页回到「唱片」视图（网易云式：默认先看到大封面）
+  useEffect(() => {
+    if (lyricOpen) setNpViewCover(true);
+  }, [lyricOpen]);
+
+  // 移动端手势①：底部迷你条向上滑动 → 展开正在播放页
+  useEffect(() => {
+    if (!isMobile) return;
+    const mini = miniPlayerRef.current;
+    if (!mini) return;
+    let y0 = -1;
+    const onStart = (e: TouchEvent) => {
+      const t = e.target as Element;
+      // 从控制按钮 / 进度条上起手时不拦截，避免误触（点按不产生位移，天然无冲突）
+      y0 = t.closest(".mp-ctrls, .mp-pbar, .mp-ptime")
+        ? -1
+        : e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (y0 < 0 || e.touches.length === 0) return;
+      if (y0 - e.touches[0].clientY > 56) {
+        y0 = -1;
+        openLyricRef.current();
+      }
+    };
+    mini.addEventListener("touchstart", onStart, { passive: true });
+    mini.addEventListener("touchmove", onMove, { passive: true });
+    return () => {
+      mini.removeEventListener("touchstart", onStart);
+      mini.removeEventListener("touchmove", onMove);
+    };
+  }, [isMobile]);
+
+  // 移动端手势②：正在播放页下拉拖拽收起。
+  // 唱片视图可在任意空白处下拉；歌词视图需歌词已滚到顶部（scrollTop 0）才能下拉，
+  // 保证与歌词纵向滚动不冲突。拖过阈值直接滑出关页，不足则回弹复位。
+  useEffect(() => {
+    if (!isMobile || !lyricOpen) return;
+    const el = lyricPageRef.current;
+    if (!el) return;
+    let startY = -1;
+    let dy = 0;
+    let armed = false;
+    let allow = false;
+    const isInteractive = (t: Element) =>
+      t.closest(
+        "input, button, a, select, textarea, [role='slider'], .mplp-collapse, .mplp-viewbtn"
+      );
+    const onStart = (e: TouchEvent) => {
+      const t = e.target as Element;
+      if (isInteractive(t)) {
+        startY = -1;
+        return;
+      }
+      startY = e.touches[0].clientY;
+      dy = 0;
+      armed = false;
+      allow = false;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (startY < 0 || e.touches.length === 0) return;
+      dy = e.touches[0].clientY - startY;
+      if (!armed) {
+        if (Math.abs(dy) < 8) return;
+        if (dy < 0) {
+          // 手势向上：交还给歌词 / 页面原生滚动
+          startY = -1;
+          return;
+        }
+        const t = e.target as Element;
+        const zone = el.querySelector<HTMLElement>(".mplp-right .mp-lyric-body-lg");
+        if (zone && zone.contains(t) && (zone.scrollTop ?? 0) > 2) {
+          startY = -1;
+          return;
+        }
+        allow = true;
+        armed = true;
+      }
+      if (!allow) return;
+      e.preventDefault();
+      el.style.transition = "none";
+      el.style.transform = `translateY(${Math.min(dy * 0.55, 320)}px)`;
+    };
+    const finish = () => {
+      if (startY < 0) return;
+      if (armed && allow && dy >= 110) {
+        // 过阈值：禁用 CSS 收起动画，由 JS 直接把整页拖出屏幕
+        el.classList.add("is-closing", "is-drag-close");
+        el.style.transition = "transform 0.28s cubic-bezier(0.32, 0.1, 0.34, 1)";
+        el.style.transform = "translateY(104%)";
+        closeLyricRef.current();
+      } else if (armed && allow) {
+        el.style.transition = "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)";
+        el.style.transform = "";
+      }
+      startY = -1;
+      armed = false;
+      allow = false;
+      dy = 0;
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", finish, { passive: true });
+    el.addEventListener("touchcancel", finish, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", finish);
+      el.removeEventListener("touchcancel", finish);
+    };
+  }, [isMobile, lyricOpen]);
 
   // 歌曲详情弹窗下：Esc 收起、锁定背景滚动
   useEffect(() => {
@@ -1756,7 +1969,7 @@ export default function MusicExplorer() {
       openLyricPage();
     };
     return (
-      <div className="mp-player">
+      <div className="mp-player" ref={miniPlayerRef}>
         <div
           ref={pbarRef}
           className={cn("mp-pbar", progHover && "is-hot")}
@@ -2264,19 +2477,47 @@ export default function MusicExplorer() {
       requestCloseLyric();
     };
 
+    // 移动端：进度条以上的“非按钮区”（封面、歌词正文/空态、头部中置信息等）点击即
+    // 在 唱片 ↔ 歌词 两个视图间切换，不再区分“封面/空白/歌词行”。真正的按钮/表单
+    // 控件与进度条、控制钮所在区域除外，避免点按钮、拖进度、调音量时误切换。
+    const toggleCoverViewOnTap = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isMobile || lyricClosing) return;
+      const target = e.target as Element;
+      if (
+        target.closest(
+          "button, a, input, select, textarea, [role='slider'], .mplp-progress, .mplp-times, .mplp-ctrls, .mplp-vol"
+        )
+      ) {
+        return;
+      }
+      // 几何判定：仅对“进度条顶部以上”的点击生效（y 小于进度条顶边即视为上方区域）
+      const bar = lyricPageRef.current?.querySelector<HTMLElement>(
+        ".mplp-progress"
+      );
+      if (!bar) return;
+      const barTop = bar.getBoundingClientRect().top;
+      if (e.clientY >= barTop) return;
+      setNpViewCover((v) => !v);
+    };
+
     return (
       <div
+        ref={lyricPageRef}
         className={cn(
           "mp-lyricpage",
           palette && "has-palette",
           lyricClosing && "is-closing",
-          !playing && "is-vinyl-paused"
+          !playing && "is-vinyl-paused",
+          npViewCover ? "np-view-cover" : "np-view-lyric"
         )}
         role="dialog"
         aria-modal="true"
         aria-hidden={lyricClosing || undefined}
-        onClick={closeLyricFromBottom}
-        aria-label={`${picked.name} 整页歌词`}
+        onClick={(e) => {
+          closeLyricFromBottom(e);
+          toggleCoverViewOnTap(e);
+        }}
+        aria-label={`${picked.name} 正在播放`}
         style={{ "--mp-acc": sourceMeta.color, ...palVars } as React.CSSProperties}>
         <div
           className="mplp-bg"
@@ -2292,14 +2533,32 @@ export default function MusicExplorer() {
             type="button"
             className="mplp-collapse"
             onClick={requestCloseLyric}
-            aria-label="收起整页歌词"
-            title="收起歌词">
+            aria-label="收起正在播放页"
+            title="收起">
             <ChevronDown />
+          </button>
+          {/* 移动端头部：中置曲目信息，右侧切换 唱片/歌词 视图（桌面端隐藏） */}
+          <div className="mplp-head-meta" aria-hidden="true">
+            <span className="t">{picked.name}</span>
+            <span className="a">
+              {artistText(picked)}
+              {picked.album ? ` · ${picked.album}` : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="mplp-viewbtn"
+            onClick={() => setNpViewCover((v) => !v)}
+            aria-pressed={!npViewCover}
+            aria-label={npViewCover ? "切换到歌词" : "切换到唱片"}
+            title={npViewCover ? "查看歌词" : "查看唱片"}>
+            {npViewCover ? <span className="txt">词</span> : <Disc3 />}
           </button>
         </div>
 
         <div className="mplp-body">
           <div className="mplp-left">
+            {/* 点击切换统一由 lyricpage 根节点的 toggleCoverViewOnTap 处理 */}
             <div className="mplp-cover">
               {coverUrl && !coverFailed ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -2315,11 +2574,15 @@ export default function MusicExplorer() {
               )}
             </div>
             <div className="mplp-info">
-              <div className="t">{picked.name}</div>
-              <div className="a">
-                {artistText(picked)}
-                {picked.album ? ` · ${picked.album}` : ""}
-              </div>
+              {/* 移动端超长歌名/歌手走无缝跑马灯；桌面端维持原静态截断 */}
+              <MarqueeText text={picked.name} className="t" animate={isMobile} />
+              <MarqueeText
+                text={`${artistText(picked)}${
+                  picked.album ? ` · ${picked.album}` : ""
+                }`}
+                className="a"
+                animate={isMobile}
+              />
             </div>
             <div className="mplp-progress">
               <input
@@ -2420,7 +2683,9 @@ export default function MusicExplorer() {
             </div>
           </div>
 
-          <div className="mplp-right">
+          {/* 歌词列：移动端行点击不跳进度，与封面同属“进度条以上非按钮区”，点击即切回唱片视图；
+              key 随视图变化：从唱片切回歌词时重挂载，让当前句立即滚入视口 */}
+          <div className="mplp-right" key={npViewCover ? "np-cover" : "np-lyric"}>
             <LyricScroller
               lines={lyricLines ?? []}
               loading={lyricsLoading}
@@ -2428,7 +2693,7 @@ export default function MusicExplorer() {
               hasRaw={Boolean(lyricRaw)}
               activeIndex={activeLyricIndex}
               large
-              onSeek={seek}
+              onSeek={isMobile ? undefined : seek}
             />
           </div>
         </div>
@@ -2482,7 +2747,8 @@ export default function MusicExplorer() {
       {/* 歌曲详情弹窗：点击播放列表行右侧的 info 图标触发 */}
       {renderTrackInfo()}
 
-      {/* 整页歌词：点击底部播放栏的歌曲封面触发，可点带时间轴的行跳转 */}
+      {/* 整页歌词：点击底部播放栏的歌曲封面触发。桌面端可点带时间轴的行跳进度；
+          移动端进度条以上非按钮区点击即切换 唱片/歌词 视图，不再点歌词跳进度 */}
       {renderLyricPage()}
     </div>
   );

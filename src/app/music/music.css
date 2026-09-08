@@ -1087,26 +1087,31 @@
   .mp-row .mp-cell-artist { display: none; }
   .mp-colhead .mp-ch-line,
   .mp-cell-line { display: none; }
-  .mp-side {
-    order: -1;
-    width: 100%;
-    border-left: none;
-    border-bottom: 1px solid var(--border-subtle);
-    min-height: 0;
+  /* 移动端隐藏顶部的「正在播放」卡片：当前曲目/进度统一由底部迷你播放条呈现，
+     列表区直接顶格铺满，不再保留桌面端挪上来的侧栏形态 */
+  .mp-side { display: none; }
+
+  /* 底部迷你播放条（移动端）：
+     - 吸收 iOS 底部安全区
+     - 单行布局：封面+曲目/滚动歌词 在左，右侧只保留 播放/下一首
+     - 上一首 / 单曲循环 / 音质切换 / 时间音量 收进「正在播放」整页 */
+  .mp-player {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: color-mix(in srgb, var(--background) 96%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(20px);
+    backdrop-filter: saturate(160%) blur(20px);
   }
-  .mp-now { flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; padding: 10px 12px; height: auto; }
-  .mp-now-flag, .mp-lyrics { display: none; }
-  .mp-artbox { max-width: 64px; margin: 0; }
-  .mp-artframe { border-radius: 10px; box-shadow: none; }
-  .mp-track-meta { text-align: left; flex: 1; min-width: 0; }
-  .mp-track-meta .t { font-size: 15px; }
-  .mp-track-meta .a { font-size: 12px; }
-  .mp-meta-line, .mp-actrow { justify-content: flex-start; }
-  .mp-prow { grid-template-columns: minmax(0, 1fr) auto; height: 54px; padding: 0 10px; }
-  .mp-ctrls { order: 1; }
-  .mp-brp { margin-left: 4px; }
-  .mp-toast { bottom: 66px; }
-  .mp-ptrack { grid-column: 1 / -1; grid-row: 1; }
+  .mp-prow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: 60px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+  .mp-player .mp-ctrls { gap: 4px; }
+  .mp-player .mp-ctrls > :first-child { display: none; } /* 上一首 */
+  .mp-player .mp-ctrls > :nth-child(4) { display: none; } /* 单曲循环 */
+  .mp-player .mp-brp { display: none; } /* 音质切换 */
+  .mp-toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
   .mp-ptime { display: none; }
   .mp-hero h1 { font-size: 24px; }
 }
@@ -1238,15 +1243,10 @@
 
 /* 未从封面提取到色系（封面缺失 / 采样失败 / 尚未就绪）时的兜底观感：
    不随外层亮暗主题漂移，固定为「浅黑背景 + 白色字体」的经典歌词页形态。
-   局部覆盖 .mp-lyricpage 子树用到的主题令牌，保证弹层/描边等都以白系呈现。 */
+   局部覆盖 .mp-lyricpage 子树用到的主题令牌，保证弹层/描边等都以白系呈现。
+   兜底不依赖封面/来源强调色：去掉默认蓝的渐变氛围与来源色光晕，控件图标统一白色。 */
 .mp-lyricpage:not(.has-palette) {
-  background:
-    radial-gradient(
-      1100px 560px at 50% -18%,
-      color-mix(in srgb, var(--mp-acc, #335eea) 13%, transparent),
-      transparent 62%
-    ),
-    linear-gradient(178deg, #1b1b1f 0%, #0c0c0f 100%);
+  background: linear-gradient(178deg, #1b1b1f 0%, #0c0c0f 100%);
   --background: #121216;
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.82);
@@ -1262,6 +1262,21 @@
   --glass-1: rgba(255, 255, 255, 0.06);
   --glass-2: rgba(255, 255, 255, 0.1);
   --glass-3: rgba(255, 255, 255, 0.16);
+  /* 强调令牌统一归白：不再落到主题默认蓝。播放键填充、开关(on)态图标、
+     进度/音量已播放段、滑块描边、焦点环等随之全部白化。 */
+  --mp-primary: #ffffff;
+  --mp-primary-bg: rgba(255, 255, 255, 0.18);
+}
+/* 去掉来源色（默认蓝 #335eea）的顶部光晕，兜底页保持纯白字 + 深底经典形态 */
+.mp-lyricpage:not(.has-palette) .mplp-accent {
+  display: none;
+}
+/* 播放键改用白系玻璃圆钮 + 白图标，与其余白色图标视觉统一
+   （纯白实心底会吞掉白图标，故用半透明白 + 内侧细描边） */
+.mp-lyricpage:not(.has-palette) .mp-ctrls .mp-play {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
 }
 
 .mplp-head {
@@ -1290,6 +1305,40 @@
   outline-offset: 2px;
 }
 .mplp-collapse svg { width: 18px; height: 18px; }
+
+/* 移动端头部元素：中置曲目信息 + 右侧「唱片/歌词」切换钮。
+   桌面端整页歌词头部只有收起按钮，以下两项默认隐藏，仅 ≤700px 显示。 */
+.mplp-head-meta { display: none; }
+.mplp-viewbtn {
+  display: none;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.mplp-viewbtn:hover { color: var(--text-primary); }
+.mplp-viewbtn:focus-visible {
+  outline: 2px solid var(--mp-primary);
+  outline-offset: 2px;
+}
+.mplp-viewbtn svg { width: 20px; height: 20px; }
+.mplp-viewbtn .txt {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 移动端下拉拖拽关页时，由 JS 直接驱动 transform 移出屏幕；
+   此状态下暂停 CSS 版 mplp-fall 收起动画，避免两者叠加导致跳动 */
+.mp-lyricpage.is-drag-close { animation: none; }
 
 .mplp-body {
   flex: 1;
@@ -1408,6 +1457,36 @@
 .mplp-info { text-align: center; max-width: 100%; }
 .mplp-info .t { font-size: 22px; font-weight: 800; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mplp-info .a { font-size: 14px; color: var(--text-muted); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* mplp-info 内的「超长文本无缝跑马灯」行（配合 MarqueeText）：
+   行结构复用 .t / .a 的字号配色与截断兜底；文本超宽并切到 .mq 时整行内
+   双副本无缝滚动（复用底部歌词 mp-lymq-scroll 关键帧）。 */
+.mplp-info .mplp-mqrow {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+.mplp-info .mplp-mqrow .mplp-mqtx {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mplp-info .mplp-mqrow.mq { text-align: left; text-overflow: clip; }
+.mplp-info .mplp-mqrow .mplp-mqtrk {
+  display: inline-flex;
+  white-space: nowrap;
+  will-change: transform;
+  animation: mp-lymq-scroll 10s linear infinite;
+}
+.mplp-info .mplp-mqrow .mplp-mqcp { padding-right: 42px; }
+.mplp-info .mplp-mqrow .mplp-mqprobe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
 .mplp-progress { width: 100%; max-width: 320px; margin-top: 2px; }
 .mplp-progress .mp-progress { margin-bottom: 10px; }
 .mplp-times { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); }
@@ -1580,35 +1659,159 @@
 .mp-lyricpage .mp-progress:active::-moz-range-thumb { opacity: 1; }
 
 @media (max-width: 700px) {
-  .mplp-head { padding: max(8px, env(safe-area-inset-top)) 12px 4px; }
-  .mplp-body {
+  /* ============================================================
+     移动端：整页升级为网易云式「正在播放页」。
+     布局 = 顶部操作条（收起/曲目/视图切换）
+            + 唱片视图（默认：大 CD + 底部进度与拇指控制）
+            + 歌词视图（np-view-lyric：歌词填满中部，Dock 常驻底部）
+     .mplp-left 拆散成独立行（display:contents），再按 order 重排：
+     cover(10) / right 歌词(20) / progress(30) / ctrls(31)
+     ============================================================ */
+  .mplp-head {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    justify-content: stretch;
+    gap: 2px;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 8px 4px;
+  }
+  /* 收起钮 / 中置信息 / 切换钮显式固定在第 1 / 2 / 3 列：唱片视图隐藏中置信息后，
+     右上「词」切换钮仍钉在最右列贴边，不会因缺项被自动排布挤到中间 */
+  .mplp-head .mplp-collapse { grid-column: 1; justify-self: start; }
+  .mplp-head-meta {
+    grid-column: 2;
+    display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 10px 18px 24px;
-    overflow-y: auto;
+    justify-content: center;
+    gap: 1px;
+    min-width: 0;
+    text-align: center;
+  }
+  .mplp-head-meta .t,
+  .mplp-head-meta .a {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mplp-head-meta .t { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+  .mplp-head-meta .a { font-size: 11.5px; color: var(--text-muted); }
+  .mplp-viewbtn { grid-column: 3; justify-self: end; display: inline-flex; }
+
+  /* 整页改为四行 CSS Grid：第 1 行是占满剩余高度的中部弹性区(1fr)，
+     第 2~4 行是常驻底部的 Dock（歌曲信息 + 进度行 + 控制钮）。
+     唱片 / 歌词放进第 1 行：黑胶在该行内垂直水平居中，因此无论屏高多少，
+     黑胶始终位于“顶部操作条”与“底部 Dock”之间剩余空间的真正正中。 */
+  .mplp-body {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-  }
-  .mplp-left {
-    flex: none;
-    width: 100%;
-    max-width: none;
-    gap: 10px;
-  }
-  .mplp-cover { width: 160px; border-radius: 50%; }
-  .mplp-cover .ph svg { width: 44px; height: 44px; }
-  .mplp-info { margin-top: 0; }
-  .mplp-info .t { font-size: 18px; }
-  .mplp-progress { margin-top: 0; }
-  .mplp-ctrls { margin-top: 0; }
-  .mplp-ctrls .mp-play { width: 46px; height: 46px; }
-  .mplp-right {
-    flex: 1 1 auto;
-    min-height: 220px;
+    justify-items: stretch;
+    gap: 0;
+    padding: 0 20px calc(env(safe-area-inset-bottom, 0px) + 18px);
     overflow: hidden;
   }
-  .mp-lyric-body-lg { padding: 6px 10px 14vh; text-align: center; }
-  .mp-lplr { padding: 6px 2px; font-size: 15px; line-height: 1.8; }
-  .mp-lplr.is-active { font-size: 20px; }
+  /* 左侧信息列拆散，子项按 grid-row 归位到对应行 */
+  .mplp-left { display: contents; }
+
+  /* —— 唱片视图（默认）：黑胶占据中部弹性区并相对该区垂直居中 —— */
+  .mplp-cover {
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+    justify-self: center;
+    margin: 0;
+  }
+  /* 歌曲信息落回 Dock：位于进度条左上角，歌名 / 作者名两行靠左排布且字号统一，
+     任一行文字过长仍走无缝跑马灯；信息已在底部展示，唱片视图不再于头部重复曲目名。 */
+  .mp-lyricpage.np-view-cover .mplp-head-meta { display: none; }
+  .mp-lyricpage.np-view-cover .mplp-info {
+    grid-row: 2;
+    grid-column: 1;
+    display: block;
+    width: 100%;
+    padding: 0;
+    text-align: left;
+  }
+  .mp-lyricpage.np-view-cover .mplp-info .t,
+  .mp-lyricpage.np-view-cover .mplp-info .a {
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .mp-lyricpage.np-view-cover .mplp-info .t {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .mp-lyricpage.np-view-cover .mplp-info .a {
+    margin-top: 2px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+  /* 歌词视图无底部信息行（曲目名保留在头部），保持隐藏 */
+  .mp-lyricpage.np-view-lyric .mplp-info { display: none; }
+  .mplp-progress { grid-row: 3; grid-column: 1; }
+  .mplp-ctrls { grid-row: 4; grid-column: 1; }
+  .mplp-vol { display: none; } /* 音量归系统音量键，iOS 底栏滑动不进整页 */
+
+  /* —— 歌词视图 —— */
+  .mp-lyricpage.np-view-cover .mplp-right { display: none; }
+  .mp-lyricpage.np-view-lyric .mplp-cover { display: none; }
+  .mp-lyricpage.np-view-lyric .mplp-right {
+    grid-row: 1;
+    grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    justify-self: stretch;
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    /* 歌词遮罩下沉到滚动容器 .mp-lyric-body-lg（见下），此处先去掉默认细遮罩，
+       避免与下层叠加，也让“加载中 / 暂无歌词”空态不被淡出 */
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  /* —— Dock：歌曲信息 + 进度行 + 大号控制钮（拇指友好）—— */
+  .mplp-cover { width: min(72vw, 300px); }
+  /* 唱片视图下信息行紧贴进度条上方，间距收窄；歌词视图无信息行，保留原顶部留白 */
+  .mplp-progress { width: 100%; max-width: none; }
+  .mp-lyricpage.np-view-cover .mplp-progress { padding-top: 10px; }
+  .mp-lyricpage.np-view-lyric .mplp-progress { padding-top: 26px; }
+  .mplp-times { font-size: 12.5px; }
+  .mplp-ctrls { gap: 28px; justify-content: center; padding-top: 2px; }
+  .mplp-ctrls .mp-play { width: 62px; height: 62px; margin: 0; }
+  .mplp-ctrls .mp-play svg { width: 26px; height: 26px; }
+  .mplp-ctrls .mp-icon-btn { width: 44px; height: 44px; }
+  .mplp-ctrls .mp-icon-btn svg { width: 25px; height: 25px; }
+
+  /* 歌词滚动区：禁止过度回弹与自身滚动条，避免与下拉手势抢事件 */
+  .mp-lyricpage .mp-lyric-body-lg {
+    padding: 6px 8px 20vh;
+    text-align: center;
+    overscroll-behavior-y: contain;
+    /* 上方已播放区 / 下方待播放区按高度比例渐隐：随歌词滚动两端淡出，
+       中央当前句附近保持完全清晰（遮罩固定在滚动视口上，不随内容移动） */
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black 18%,
+      black 82%,
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black 18%,
+      black 82%,
+      transparent 100%
+    );
+  }
+  /* 加大行距与行盒留白，降低歌词密度，让当前句与前后的间隔更明显 */
+  .mp-lplr { padding: 12px 4px; font-size: 15px; line-height: 2.1; }
+  .mp-lplr.is-active { font-size: 20px; line-height: 1.85; }
+
+  /* 唱片可点按（切到歌词），给出手感 */
+  .mplp-cover { cursor: pointer; }
 }
 
 /* 底栏歌曲封面按钮（点击打开整页歌词） */

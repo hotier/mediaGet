@@ -80,6 +80,7 @@ export const viewport: Viewport = {
   themeColor: "#0b0b14",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -98,7 +99,10 @@ export default function RootLayout({
             __html: `(function(){function mode(){try{var t=localStorage.getItem("theme");return t==="light"||t==="dark"||t==="system"?t:"system";}catch(e){return "system";}}function apply(){var m=mode();var d=m==="dark"||(m==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var el=document.documentElement;el.classList.remove("dark","light");el.classList.add(d?"dark":"light");}apply();try{window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",apply);}catch(e){}})();`,
           }}
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
         <link rel="icon" type="image/svg+xml" href="/icon.svg" />
         <link rel="apple-touch-icon" href="/icon.png" />
         <script
