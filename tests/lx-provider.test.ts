@@ -1,5 +1,8 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   LxProviderError,
   brToLxQuality,
@@ -57,12 +60,16 @@ function setConfig(scripts) {
 beforeEach(() => {
   delete process.env.MUSIC_LX_SCRIPTS;
   delete process.env.MUSIC_LX_SCRIPT_TTL_MS;
+  delete process.env.MUSIC_LX_SCRIPTS_DIR;
+  delete process.env.MUSIC_LX_URL_FALLBACKS;
   resetLxScriptRegistryForTest();
 });
 
 afterEach(() => {
   delete process.env.MUSIC_LX_SCRIPTS;
   delete process.env.MUSIC_LX_SCRIPT_TTL_MS;
+  delete process.env.MUSIC_LX_SCRIPTS_DIR;
+  delete process.env.MUSIC_LX_URL_FALLBACKS;
   resetLxScriptRegistryForTest();
 });
 
@@ -256,5 +263,112 @@ describe("lx 脚本注册层（注入 fetcher + env 配置）", () => {
     const cat = await getLxCatalog();
     expect(cat.scripts[0].ok).toBe(false);
     expect(cat.scripts[0].error).toContain("网络错误");
+  });
+});
+
+/** 聚合音源风格：同时声明 wy/tx（仅 musicUrl）与 qdy（可搜可播） */
+const MULTI_SOURCE_SCRIPT = `/*!
+ * @name 聚合测试
+ * @version 1.0.0
+ */
+const { EVENT_NAMES, on, send } = globalThis.lx;
+send(EVENT_NAMES.inited, {
+  sources: {
+    wy: { name: "网易云", type: "music", actions: ["musicUrl"], qualitys: ["320k"] },
+    tx: { name: "QQ音乐", type: "music", actions: ["musicUrl"], qualitys: ["320k"] },
+    qdy: { name: "汽水", type: "music", actions: ["musicSearch", "musicUrl", "lyric"] },
+  },
+});
+on(EVENT_NAMES.request, async () => ({ url: "https://cdn.example/x.mp3" }));`;
+
+describe("音源兜底映射（urlFallbacks）", () => {
+  it("默认映射仅保留「已注册且带 musicUrl」的 source（wy/tx 生效，kw/kg/mg/qdy 忽略）", async () => {
+    setLxScriptFetcherForTest(async () => MULTI_SOURCE_SCRIPT);
+    setConfig([{ id: "agg", url: "https://scripts.example/agg.js" }]);
+    const cat = await getLxCatalog();
+    expect(cat.urlFallbacks).toEqual([
+      { platform: "netease", source: "wy" },
+      { platform: "tencent", source: "tx" },
+    ]);
+  });
+
+  it("MUSIC_LX_URL_FALLBACKS JSON 可增改：kugou 改指 qdy 也生效", async () => {
+    process.env.MUSIC_LX_URL_FALLBACKS = JSON.stringify({ kugou: "qdy" });
+    setLxScriptFetcherForTest(async () => MULTI_SOURCE_SCRIPT);
+    setConfig([{ id: "agg", url: "https://scripts.example/agg.js" }]);
+    const cat = await getLxCatalog();
+    expect(cat.urlFallbacks).toContainEqual({ platform: "kugou", source: "qdy" });
+  });
+
+  it("MUSIC_LX_URL_FALLBACKS 可关闭某项（netease=0）", async () => {
+    process.env.MUSIC_LX_URL_FALLBACKS = "netease=0";
+    setLxScriptFetcherForTest(async () => MULTI_SOURCE_SCRIPT);
+    setConfig([{ id: "agg", url: "https://scripts.example/agg.js" }]);
+    const cat = await getLxCatalog();
+    expect(cat.urlFallbacks.some((e) => e.platform === "netease")).toBe(false);
+  });
+
+  it("未配置脚本时 urlFallbacks 为空", async () => {
+    const cat = await getLxCatalog();
+    expect(cat.urlFallbacks).toEqual([]);
+  });
+});
+
+describe("本地脚本文件接入（file:// / 本地路径 / 目录扫描）", () => {
+  let dir;
+  beforeEach(async () => {
+    // 恢复默认 fetcher（http(s) fetch + 本地读文件），让文件路径走真实 IO
+    setLxScriptFetcherForTest(null);
+    dir = await mkdtemp(join(tmpdir(), "lx-test-"));
+  });
+  afterEach(async () => {
+    delete process.env.MUSIC_LX_SCRIPTS_DIR;
+    resetLxScriptRegistryForTest();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const writeFileIn = (name, code) => writeFile(join(dir, name), code, "utf8");
+  const fileUrlOf = (p) => `file:///${p.replace(/\\/g, "/")}`;
+
+  it("MUSIC_LX_SCRIPTS 支持 file:// URL 读取本地脚本", async () => {
+    const p = join(dir, "qdy.js");
+    await writeFileIn("qdy.js", VALID_SCRIPT);
+    setConfig([{ id: "qdy", url: fileUrlOf(p) }]);
+    const cat = await getLxCatalog();
+    expect(cat.scripts).toHaveLength(1);
+    expect(cat.scripts[0]).toMatchObject({ id: "qdy", ok: true, state: "ok" });
+    expect(cat.sources.some((s) => s.key === "qdy")).toBe(true);
+  });
+
+  it("MUSIC_LX_SCRIPTS 支持本地绝对路径（不带 file://）", async () => {
+    const p = join(dir, "qdy.js");
+    await writeFileIn("qdy.js", VALID_SCRIPT);
+    setConfig([{ id: "qdy", url: p }]);
+    const cat = await getLxCatalog();
+    expect(cat.scripts[0].ok).toBe(true);
+  });
+
+  it("MUSIC_LX_SCRIPTS_DIR 目录扫描：目录内 *.js 按文件名生成 id 并加载", async () => {
+    await writeFileIn("a-01.js", VALID_SCRIPT);
+    process.env.MUSIC_LX_SCRIPTS_DIR = dir;
+    const cat = await getLxCatalog();
+    expect(cat.scripts).toHaveLength(1);
+    expect(cat.scripts[0]).toMatchObject({ id: "a-01", ok: true, state: "ok" });
+    expect(cat.sources.some((s) => s.key === "qdy")).toBe(true);
+  });
+
+  it("显式目录不存在 → 报错说明目录不可用，而不是静默", async () => {
+    process.env.MUSIC_LX_SCRIPTS_DIR = join(dir, "no-such-dir");
+    await expect(getLxCatalog()).rejects.toThrow("MUSIC_LX_SCRIPTS_DIR");
+  });
+
+  it("目录内文件逐个隔离：无效脚本标 error，不影响其它脚本加载", async () => {
+    await writeFileIn("bad.js", "not a valid script @@@");
+    await writeFileIn("good.js", VALID_SCRIPT);
+    process.env.MUSIC_LX_SCRIPTS_DIR = dir;
+    const cat = await getLxCatalog();
+    expect(cat.scripts.map((s) => s.id).sort()).toEqual(["bad", "good"]);
+    expect(cat.scripts.find((s) => s.id === "bad").ok).toBe(false);
+    expect(cat.scripts.find((s) => s.id === "good").ok).toBe(true);
+    expect(cat.sources.some((s) => s.key === "qdy")).toBe(true);
   });
 });

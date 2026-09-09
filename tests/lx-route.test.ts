@@ -60,6 +60,7 @@ const CATALOG_OK = {
       scriptId: "qdy",
     },
   ],
+  urlFallbacks: [{ platform: "netease", source: "qdy" }],
 };
 
 beforeEach(() => {
@@ -82,9 +83,10 @@ describe("GET /api/music/lx · action=sources", () => {
     expect(json.data.scripts).toEqual([]);
     expect(json.data.searchSources).toEqual([]);
     expect(json.data.allSourceKeys).toEqual([]);
+    expect(json.data.urlFallbacks).toEqual([]);
   });
 
-  it("配置脚本 → 展开可搜索源（key/label/qualitys/scriptId）与全部 key", async () => {
+  it("配置脚本 → 展开可搜索源（key/label/qualitys/scriptId）、全部 key 与音源兜底映射", async () => {
     mocked.getLxCatalog.mockResolvedValue(CATALOG_OK);
     const res = await callLx({ action: "sources" });
     const json = await res.json();
@@ -93,6 +95,7 @@ describe("GET /api/music/lx · action=sources", () => {
       { key: "qdy", label: "汽水音乐", qualitys: ["128k", "320k", "flac"], scriptId: "qdy" },
     ]);
     expect(json.data.allSourceKeys).toEqual(["qdy"]);
+    expect(json.data.urlFallbacks).toEqual([{ platform: "netease", source: "qdy" }]);
   });
 
   it("目录层故障 → 502 script-not-ready", async () => {

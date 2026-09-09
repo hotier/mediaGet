@@ -19,9 +19,10 @@ export const runtime = "nodejs";
  *   GET /api/music/lx?action=lyric&source=qsvip&id=<歌曲ID>
  *
  * 与 /api/music（provider=gd，GD 公共上游契约）互补：本接口把配置的洛雪自定义
- * 音源脚本（MUSIC_LX_SCRIPTS 环境变量，qdy/qsvip 类）按 lx-host 沙箱执行，把
- * 脚本内声明的 source/action 暴露成与 /api/music 一致的动作契约。响应均遵循
- * { code, msg, data }。仅能在 nodejs runtime 运行（本机 / Vercel / Docker）。
+ * 音源脚本（qdy/qsvip 类，配置见 lx-provider.js：MUSIC_LX_SCRIPTS /
+ * MUSIC_LX_SCRIPTS_DIR / .lxref/scripts 目录）按 lx-host 沙箱执行，把脚本内声明的
+ * source/action 暴露成与 /api/music 一致的动作契约。响应均遵循 { code, msg, data }。
+ * 仅能在 nodejs runtime 运行（本机 / Vercel / Docker）。
  */
 
 const SEARCH_PAGE_MAX = 20;
@@ -70,6 +71,7 @@ export async function GET(request) {
             scriptId: s.scriptId,
           })),
           allSourceKeys: catalog.sources.map((s) => s.key),
+          urlFallbacks: catalog.urlFallbacks || [],
         },
       });
     } catch (err) {

@@ -1,0 +1,69 @@
+
+> tiny-wind-3b79@0.1.24 dev
+> next dev --turbopack
+
+ ⚠ Port 3000 is in use by an unknown process, using available port 3003 instead.
+   ▲ Next.js 15.5.23 (Turbopack)
+   - Local:        http://localhost:3003
+   - Network:      http://198.18.0.1:3003
+   - Experiments (use with caution):
+     · optimizePackageImports
+
+ ✓ Starting...
+ ✓ Ready in 7.1s
+ ⚠ Webpack is configured while Turbopack is not, which may cause problems.
+ ⚠ See instructions if you need to configure Turbopack:
+  https://nextjs.org/docs/app/api-reference/next-config-js/turbopack
+
+ ○ Compiling /music ...
+ ✓ Compiled /music in 10.4s
+ GET /music 200 in 11388ms
+ GET /music 200 in 827ms
+ ○ Compiling /api/music ...
+ ✓ Compiled /api/music in 1419ms
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 1/60
+Cache miss for: gdmusic:search:netease:周杰伦:10:1...
+gdmusic search upstream error: fetch failed
+[music] time=2026-09-08 17:13:49 code=502 status=search-failed duration=5048ms source=netease keyword=周杰伦
+ GET /api/music?action=search&source=netease&keyword=%E5%91%A8%E6%9D%B0%E4%BC%A6&page=1&count=10 502 in 6901ms
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 2/60
+Cache miss for: gdmusic:search:netease:周杰伦:10:1...
+Cache set for: gdmusic:search:netease:周杰伦:10:1...
+[music] time=2026-09-08 17:14:17 code=200 status=search duration=5950ms source=netease keyword=周杰伦
+ GET /api/music?action=search&source=netease&keyword=%E5%91%A8%E6%9D%B0%E4%BC%A6&page=1&count=10 200 in 6463ms
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 3/60
+Cache miss for: gdmusic:search:netease:周杰伦:10:2...
+Cache set for: gdmusic:search:netease:周杰伦:10:2...
+[music] time=2026-09-08 17:14:18 code=200 status=search duration=1282ms source=netease keyword=周杰伦
+ GET /api/music?action=search&source=netease&keyword=%E5%91%A8%E6%9D%B0%E4%BC%A6&page=2&count=10 200 in 1752ms
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 4/60
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 5/60
+Cache miss for: gdmusic:netease:5257138:320...
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 6/60
+Cache miss for: gdmusic:pic:netease:109951165671182684:300...
+Cache set for: gdmusic:netease:5257138:320...
+[music] time=2026-09-08 17:14:27 code=200 status=success duration=3516ms source=netease id=5257138 br=320
+ GET /api/music?source=netease&id=5257138&br=320 200 in 4567ms
+Cache set for: gdmusic:pic:netease:109951165671182684:300...
+[music] time=2026-09-08 17:14:27 code=200 status=pic duration=3799ms source=netease pic_id=109951165671182684 size=300
+ GET /api/music?action=pic&source=netease&id=109951165671182684&size=300 200 in 4720ms
+[music] request from IP: ::1
+Request allowed for IP: ::1, count: 7/60
+Cache miss for: gdmusic:picbin:netease:109951165671182684:300...
+Cache set for: gdmusic:picbin:netease:109951165671182684:300...
+[music] time=2026-09-08 17:14:28 code=200 status=picbin duration=366ms source=netease pic_id=109951165671182684
+ GET /api/music?action=pic&source=netease&id=109951165671182684&size=300&bin=1 200 in 982ms
+gdmusic lyric upstream error: fetch failed
+ GET /api/music?action=lyric&source=netease&id=5257138 502 in 5893ms
+ ✓ Compiled in 1698ms
+ ✓ Compiled in 7s
+ ✓ Compiled in 198ms
+ ✓ Compiled in 226ms
+ ✓ Compiled in 194ms
+ ✓ Compiled in 1189ms

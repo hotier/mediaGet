@@ -11,10 +11,12 @@ const PLATFORM_LOGOS: Partial<Record<SearchSourceKey, string>> = {
   netease: "/logos/netease.svg",
   kuwo: "/logos/kuwo.svg",
   joox: "/logos/joox.svg",
+  // GD 直链通道对 QQ音乐的 source key 为 tencent；品牌 logo 复用平台解析用的 qqmusic.svg
+  tencent: "/logos/qqmusic.svg",
 };
 
 export interface PlatformIconProps {
-  /** 平台 key（netease / kuwo / joox） */
+  /** 平台 key（netease / tencent / kuwo / joox） */
   source: SearchSourceKey;
   /** 图标边长（默认 14） */
   size?: number;

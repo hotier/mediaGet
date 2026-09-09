@@ -1,6 +1,6 @@
 # API 文档
 
-短视频解析服务 API 文档
+短视频解析 + 音乐解析服务 API 文档
 
 ## 基础信息
 
@@ -144,6 +144,38 @@ Content-Type: application/json
 ```
 
 **响应**: 与 `/api/parse` 一致（`code: 200` + 统一 `data` 字段契约；提取不到链接返回 `400`）。同样支持 `&fmt=text` 纯文本模式、共享缓存与并发保护。
+
+---
+
+### 0.2 各平台专用接口一览
+
+除统一入口 `/api/parse` 外，各平台保留独立直连接口 `GET /api/{platform}?url=<分享链接>`，响应与统一入口一致（`code: 200` + 归一化 `data` 契约）。以下为当前实际注册的完整清单：
+
+| 路径 | 平台 | 备注 |
+|------|------|------|
+| `/api/douyin` | 抖音 | 见 §1 |
+| `/api/bilibili` | 哔哩哔哩 | 见 §2（另含 `/api/bilibili/opus` 图文动态） |
+| `/api/kuaishou` | 快手 | 见 §3 |
+| `/api/weibo` | 微博 | 见 §4（自动游客模式） |
+| `/api/xhs` | 小红书 | 见 §5（视频 / 图文） |
+| `/api/qsmusic` | 汽水音乐 | 见 §6（音乐类，返回音频直链） |
+| `/api/pipigx` | 皮皮搞笑 | 见 §7 |
+| `/api/ppxia` | 皮皮虾 | 见 §8 |
+| `/api/xigua` | 西瓜视频 | — |
+| `/api/zuiyou` | 最右 | — |
+| `/api/huya` | 虎牙 | — |
+| `/api/acfun` | AcFun | — |
+| `/api/quanminkge` | 全民K歌 | 音乐类，返回音频直链 |
+| `/api/sixroom` | 六间房 | — |
+| `/api/xinpianchang` | 新片场 | — |
+| `/api/haokan` | 好看视频 | — |
+| `/api/qqmusic` | QQ音乐 | 音乐类，返回音频直链 |
+| `/api/tiktok` | TikTok | 依赖 yt-dlp（child_process），仅 Docker / Node 环境可用 |
+| `/api/twitter` | X（Twitter） | — |
+| `/api/instagram` | Instagram | 2024+ 匿名请求被登录墙拦截，建议配 `IG_COOKIE` |
+| `/api/youtube` | YouTube | 多源 HTTP 解析；源不可用时降级官方嵌入播放（`embedOnly`，无直链） |
+
+> 平台 key 与目录名不完全一致：小红书 key=`redbook`（目录 `/api/xhs`）、皮皮虾 key=`pipixia`（目录 `/api/ppxia`）；统一入口为推荐入口，专用直连接口仅供既有调用方使用。
 
 ---
 
@@ -390,14 +422,14 @@ GET /api/qsmusic?url=https://music.douyin.com/qishui/share/track?track_id=xxx
 
 ---
 
-### 7. 皮皮虾视频解析
+### 7. 皮皮搞笑视频解析
 
 **接口**: `GET /api/pipigx`
 
 **参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| url | string | 是 | 皮皮虾视频链接 |
+| url | string | 是 | 皮皮搞笑视频链接 |
 
 ---
 
@@ -486,25 +518,29 @@ GET /api/health
 
 **接口**: `GET /api/music`
 
-**说明**: 多音乐源聚合接口（默认上游 music-api.gdstudio.xyz，覆盖网易云/酷我/JOOX/QQ音乐等曲库）。通过 `action` 分流三种能力，适合「搜歌 → 试听/下载 → 封面」一体化流程：
+**说明**: 多音乐源聚合接口（默认上游 music-api.gdstudio.xyz，覆盖网易云/酷我/JOOX/QQ音乐等曲库）。通过 `action` 分流**四种**能力，适合「搜歌 → 试听/下载 → 封面 → 歌词」一体化流程；`url` / `pic` 分支另支持 `bin=1` 直接返回文件字节（见下文）：
 
 > **部署环境注意（Vercel/海外机房）**：默认公共上游对数据中心/海外出口会返回 Cloudflare 人机校验页，导致本接口在 Vercel 等云函数环境恒 502（本机 dev 因走家用宽带而正常）。服务端已在各分支对该情况记 warn 日志并把风控页归类为 `502 sources-down`（不再把校验页当歌词/封面）。
 >
 > 上游支持**多基址回退链**：环境变量 `MUSIC_API_BASES`（逗号/空白分隔，按序）或单基址 `MUSIC_API_BASE` 覆盖默认公共实例；每类上游请求按序尝试，主源网络异常 / HTTP 错误 / CF 风控页时自动切换下一个基址（业务级 `rejected` / `not-found` 不回退），总耗时受 8s 预算约束并均分到剩余基址。注意：接入基址必须同为 gdstudio 契约（`types=search/url/pic/lyric` 参数一致）且对该部署出口可达——实测不可达的地址只会拖慢失败；可用线上请求日志 `music … all bases down … reason=` 定位不可用的基址。若基址均不可达，最终仍回落到 `502 sources-down`，前端 `music-client.ts` 随即走浏览器直连兜底（用户民用网络不受数据中心出口拦截影响）。
+
+> 若 GD 代理与浏览器直连通道均不可用，`netease`/`kuwo` 的搜索会自动回退到**自研直连搜索通道**（`/api/music/self`）；此外 `tencent`/`kugou`/`migu` 在 GD 未开放搜索，作为内置自研搜索源 chips 直接走该通道（见 12.5）。
 
 | action | 能力 | 适用场景 |
 |--------|------|----------|
 | `url`（默认） | 按「音乐源 + 曲目ID」取播放直链 | 已持有曲目 ID 的调用方 |
 | `search` | 按歌名/歌手搜歌，支持服务端分页 | 前端关键词搜索 |
 | `pic` | 用 search 结果里的 `pic_id` 换专辑封面直链 | 播放器显示封面 |
+| `lyric` | 按曲目 ID（`id`/`lyric_id`）取歌词 | 播放器滚动歌词 |
 
 共用参数：
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | source | string | 选填 | 音乐源，默认 `netease`。可选：`netease`、`tencent`、`kuwo`、`tidal`、`qobuz`、`joox`、`bilibili`、`apple`、`ytmusic`、`spotify`（部分源暂未开放） |
-| action | string | 选填 | `url` / `search` / `pic`，默认 `url` |
+| action | string | 选填 | `url` / `search` / `pic` / `lyric`，默认 `url` |
 | fmt | string | 选填 | `text` 时返回纯文本（仅 `url`/`pic` 有效，成功为直链一行；搜索恒为 JSON） |
+| bin | string | 选填 | `1` 时：`url` 分支命中直链后服务端字节代理下载（`Content-Disposition: attachment`，文件名带音质标签、扩展名跟随上游 Content-Type）；`pic` 分支返回封面图片字节（同源取色用，带 5 分钟缓存）。不与 `fmt=text` 组合 |
 
 ### 12.1 `action=url`：取播放直链
 
@@ -617,6 +653,10 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 
 > 封面 URL 统一升级为 https（酷我等图床原生返回 http，但其 CDN 支持 TLS），避免线上 https 页面 mixed-content 被浏览器拦截。
 
+**`action=lyric`（获取歌词）**：参数同直链（`source` + `id`，兼容 `lyric_id` 别名），返回 `data.lyric`（LRC 时间轴或纯文本；上游直接返回 LRC 纯文本时原样透传）。歌词接口没有 `fmt=text` 形态。
+
+> `bin=1` 仅作用于 `url` / `pic` 分支：`url` 命中直链后不回 JSON，改为服务端字节代理下载（`attachment`，文件名自动带上音质标签，如「曲名 - 无损音质·24bit.flac」）；`pic` 分支返回封面图片字节，用于浏览器端 `<canvas>` 取色（规避第三方图床无 CORS 导致画布污染）。
+
 **失败分类**（各 action 通用，响应带 `failType` 便于程序判断）:
 
 | 状态码 | failType | 场景 |
@@ -625,6 +665,131 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 | 400 | `source-unavailable` | source 在上游侧被拒（暂未开放/不可用）；搜索源未开放 |
 | 404 | `not-found` | 直链：曲目不存在或该源无可用音源；封面：pic_id 无效或无专辑封面 |
 | 502 | `sources-down` | 上游接口网络异常 / 响应无法解析 |
+
+---
+
+### 12.4 洛雪(lx-music)自定义音源（音源扩展）
+
+**接口**: `GET /api/music/lx`（`provider=lx`；仅 `nodejs` runtime）
+
+**说明**: `/api/music`（`provider=gd`）只能使用 GD 公共上游白名单内的源，本接口把社区 lx-music 音源脚本（如 qsvip / qdy 类）放在服务端沙箱（`node:vm`）中执行，将脚本声明的源暴露为与 `/api/music` 一致的动作契约，用作 GD 源之外的补充 / 平替。脚本一律视为不可信代码，仅暴露带白名单的 `fetch` 代理；未配置脚本时 `sources` 返回空目录。
+
+**脚本来源三种配置方式可叠加（详见下方 env 样例）**:
+1. `MUSIC_LX_SCRIPTS`：脚本 URL / `file://` / 本地文件路径（多个以英文逗号、空格分隔，或 JSON 数组 `[{"id":"qsvip","url":"..."}]`）；
+2. `MUSIC_LX_SCRIPTS_DIR`：脚本目录，目录内每个 `*.js` 按文件名为一个脚本加载；
+3. 未设置 `MUSIC_LX_SCRIPTS_DIR` 时，仓库根目录 `.lxref/scripts/` 若存在则自动加载其中全部 `*.js`（本地开发与 Docker 部署“放入即生效”）。同名脚本 id 只保留最先配置的一份。
+
+| action | 能力 | 说明 |
+|--------|------|------|
+| `sources` | 列出已加载脚本与可用源 | 无其它参数；返回 `data.enabled / scripts / searchSources / allSourceKeys` |
+| `search` | 按关键词搜索 | `source` + `keyword`，可选 `page`（默认 1，上限 20）/ `count`（默认 20，最大 30） |
+| `url`（默认） | 取播放直链 | `source` + `id`（兼容 `url_id`），可选 `br`（`128`/`192`/`320`/`740`/`999` → 脚本 quality）；可透传 `songmid`/`hash`/`title`/`artist`/`album` 供脚本跨源命中 |
+| `lyric` | 取歌词 | `source` + `id`（兼容 `lyric_id`） |
+
+**search 响应**: `data { source, keyword, page, hasMore, count, items[] }`；`items` 为归一化 SearchItem（`id/urlId/lyricId/name/artist[]/album/source`）；`hasMore` 仅在未到页码上限、有实回且脚本未声明结束时为 `true`。
+
+**url 响应**: `data { url, br, size, source, id }`；找不到可播音源返回 `404`。
+
+**失败分类**:
+
+| 状态码 | failType | 场景 |
+|--------|----------|------|
+| 400 | `source-unavailable` | source 不在任何已加载脚本中 / 脚本未注册该源 |
+| 502 | `script-not-ready` | 脚本未加载完成、脚本加载通道故障 |
+| 502 | `script-error` | 脚本执行期错误（内部网络异常、脚本自身业务错误等） |
+
+> 与 `/api/music` 不同，lx 源只能在 Node 侧执行，浏览器端不存在直连兜底；任何失败都直接展示服务端 `msg`，不触发前端降级。
+
+### 12.5 自研直连搜索（补充搜索源，仅 `search`）
+
+**接口**: `GET /api/music/self`（`runtime=nodejs`）
+
+**说明**: 服务端直连各大音源搜索 API 的补充通道（签名 / 请求构造为代码内自研实现，移植自 lx-music 的 musicSdk），用于补上 GD 通道搜索能力的缺口。`source` 键沿用 GD 通道命名，支持 `netease` / `tencent` / `kugou` / `kuwo` / `migu`。搜索结果与 `/api/music` 的 `action=search` 对齐统一契约，播放 / 歌词 / 封面不在此接口（仍走既有 GD / lx 通道）。
+
+该通道承载两类用途：
+1. **独立搜索源 chips（tencent / kugou / migu）**：GD 未开放这三家搜索（kugou/migu 连直链引擎也没有），前端把三家注册为内置搜索源 chip 直接走本通道；
+2. **双通道源（netease / kuwo）的搜索主通道**：netease / kuwo 的搜索以本通道为主；自研通道失败时前端才回退 GD 搜索引擎（同源代理 → 浏览器直连），并把该源会话置位——后续翻页直接走 GD，不再每次空转本通道。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| action | string | 选填 | 仅支持 `search`（默认），其余返回 400 |
+| source | string | 是 | `netease` / `tencent` / `kugou` / `kuwo` / `migu`（不在白名单返回 400，响应带 `supportedSources` 目录） |
+| keyword | string | 是 | 搜索关键词（歌名/歌手），也兼容 `name` 别名，空返回 400 |
+| count | string | 选填 | 每页条数，默认 `20`，最大 `30` |
+| page | string | 选填 | 页码，默认 `1`，上限 `50`（平台翻页价值有限，防御空转） |
+
+**示例请求**:
+```
+GET /api/music/self?action=search&source=tencent&keyword=晴天&count=20&page=1
+GET /api/music/self?source=kugou&keyword=晴天
+```
+
+**响应示例**:
+```json
+{
+  "code": 200,
+  "msg": "搜索成功",
+  "data": {
+    "source": "tencent",
+    "keyword": "晴天",
+    "page": 1,
+    "hasMore": false,
+    "count": 20,
+    "total": 20,
+    "line": { "kind": "self", "base": "self-search" },
+    "items": [
+      {
+        "id": "0039MnYb0qxYhV",
+        "urlId": "0039MnYb0qxYhV",
+        "lyricId": "0039MnYb0qxYhV",
+        "name": "晴天",
+        "artist": ["周杰伦"],
+        "album": "叶惠美",
+        "source": "tencent",
+        "picUrlDirect": "https://y.qq.com/music/photo_new/T002R300x300M000xxx.jpg"
+      }
+    ]
+  }
+}
+```
+
+> 字段说明：`hasMore` 由服务端判定（有 total 的平台按 `page*count < total` 精确算，缺失时按「回满整页且未到页码上限」兜底）；`line.kind=self` 标注这是自研直连通道的产物（区别于 GD 的 `proxy` / 浏览器直连的 `direct`）。封面**不强求**：能随搜索响应直接携带的图床 URL 写入 `picUrlDirect` 供前端直接展示（跳过 GD 式 `pic_id` 二次换取），没有则缺省该字段、前端兜底占位封面；任何情况下不会为拿封面额外打一次搜索源接口。
+
+各源产物与其直链通道的衔接关系：
+
+| source | 自研搜索结果 id 语义 | 播放 / 歌词 / 封面 |
+|--------|----------------------|---------------------|
+| `tencent` | `id=urlId=lyricId=songmid` | 复用 GD `tencent` 通道（songmid 直链） |
+| `netease` | 网易云曲目 id | 复用 GD `netease` 通道 |
+| `kuwo` | 酷我 rid | 复用 GD `kuwo` 通道 |
+| `kugou` | `id`=酷狗 audio_id / hash（`urlId` 为空） | 无 GD/lx 直链引擎，**仅搜索展示** |
+| `migu` | 咪咕 songId（`urlId` 为空） | 无 GD/lx 直链引擎，**仅搜索展示** |
+
+> kugou / migu 无内置直链引擎：默认只能展示搜索结果（封面不强求即源于此）；若配置了洛雪音源脚本且 `/api/music/lx?action=sources` 返回 `urlFallbacks`（默认映射 netease→wy、tencent→tx、kuwo→kw、kugou→kg、migu→mg，可用 `MUSIC_LX_URL_FALLBACKS` 覆盖/关闭，仅当脚本注册了该 source 才生效），点播/切音质会由 music-client `requestPlayDirect` 自动改由音源脚本按同曲 id/hash/songmid 换直链（GD 主通道取直链失败时同样触发该兜底）。未配置映射/脚本时，前端给出明确提示「该音源自研搜索结果仅供识别，暂未接入试听直链引擎；可切到网易云/QQ/酷我等音源搜索同一首歌」，不会把请求空打到 GD 上游。
+
+**失败分类**:
+
+| 状态码 | failType | 场景 |
+|--------|----------|------|
+| 400 | - | 参数非法：`action` 非 `search` / `source` 不在白名单（响应带 `supportedSources`）/ `keyword` 为空 |
+| 400 | `source-unavailable` | source 不在自研搜索白名单（与上同） |
+| 502 | `sources-down` | 该源搜索接口网络异常 / 响应无法解析 / 命中平台风控 |
+
+> 成功结果走进程内存 5 分钟缓存（与主接口一致），IP 级限流 / 黑名单拦截与主接口同策略。
+
+### 12.6 音乐「链接解析」
+
+**接口**: `GET /api/music/resolve?link=<歌曲分享链接或整段分享文本>`
+
+**说明**: 解决「已知歌曲链接 → 归一曲目（`source` + `id` + 元数据）」的问题，与 `/api/music`（解决「关键词搜索 → 直链」）互补。输入先做平台识别与曲目 ID 提取（纯函数，**不直接请求用户链接**，SSRF 面收敛到白名单短链域；官方分享短链如 `163cn.tv` / `c.y.qq.com` 由服务端跟随一次重定向后再识别）。解析产物为标准 SearchItem，播放 / 下载仍走既有 `/api/music` 直链链路（含代理 / 直连降级、`bin=1` 下载、歌词、封面）。
+
+| 状态 | 说明 |
+|------|------|
+| `playable` | 网易云 / QQ音乐 / 酷我歌曲已识别并补齐元数据：`data { status, platform, songId, metadata: "full"\|"fallback", item }`。`metadata="full"` 表示官方详情成功取回（封面为图床直链 `item.picUrlDirect`）；详情通道失败不致命，自动降级为 ID 占位标题，仍可播放 / 下载 |
+| `engine-missing` | 已识别为酷狗歌曲（直链引擎尚未接入）：`data { status, platform, songId, message }` |
+| HTTP 400 | 无法识别（非歌曲详情页链接，如歌单 / 歌手主页 / 视频页 / 未知 host），响应带 `supported: { ready: ["netease", "tencent", "kuwo"], pending: ["kugou"] }` |
+
+> 受支持链接示例：`https://music.163.com/song?id=347230`、`https://y.qq.com/n/ryqq/songDetail/<songmid>`、`https://www.kuwo.cn/play_detail/<rid>`、`163cn.tv` 分享短链、整段分享文案（自动抽链）。直链引擎 = 官方元数据通道 + GD 直链通道的组合（QQ 以 songmid、酷我以 rid 走 GD `action=url`），网易云详情走官方 song/detail；三平台详情成功时各自缓存 5 分钟，直链不在本接口预取，由播放端按 `id` 实时请求。
 
 ---
 
@@ -645,11 +810,10 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 如需完整功能，需配置以下环境变量：
 
 ```env
-# 抖音
-# DOUYIN_COOKIE 失效自检：配置后若连续 5 次解析都命中抖音风控，服务会在日志中
-# 打出「DOUYIN_COOKIE 疑似失效」告警提示更新，成功解析后自动复位
+# 抖音（可选）：匿名 ttwid + UA 轮询为主链路；配置登录 Cookie 仅作增强
+# （连续 5 次命中风控时日志会打出「DOUYIN_COOKIE 疑似失效」告警，成功解析自动复位）
+# UA 已改为代码内轮询，不存在 DOUYIN_USER_AGENT 变量
 DOUYIN_COOKIE=your_cookie
-DOUYIN_USER_AGENT=your_user_agent
 
 # 哔哩哔哩
 # BILIBILI_COOKIE 强烈建议配置：服务器为数据中心/海外出口时，匿名请求会被 B 站 WAF
@@ -664,8 +828,47 @@ DOUYIN_USER_AGENT=your_user_agent
 BILIBILI_COOKIE=your_cookie
 BILIBILI_USER_AGENT=your_user_agent
 
-# 微博（已改为自动游客模式，无需配置 Cookie；见下方说明）
-# WEIBO_COOKIE=your_cookie
+# 微博：自动游客模式，无需配置 Cookie（WEIBO_COOKIE 已废弃，勿再配置）
+
+# 小红书（可选）：数据中心 / 海外出口被风控时，配置登录 Cookie 可稳定解析
+# XHS_COOKIE=your_cookie
+
+# Instagram（可选但强烈建议）：匿名请求已全面登录墙，需配置登录态 Cookie 才可稳定解析
+# IG_COOKIE=your_cookie
+# IG_TIMEOUT_MS=20000
+
+# QQ音乐 source+id 解析（可选）：登录 Cookie 可降低 vkey 试听接口风控
+# QQMUSIC_COOKIE=your_cookie
+
+# X/Twitter 解析（可选）：逗号分隔的 fxTwitter / fixupx / vxtwitter 等 fixer 服务，覆盖默认集
+# TWITTER_FIXER_SERVICES=https://api.fxtwitter.com,...
+
+# YouTube（可选）：官方 Data API v3 密钥仅作优先元数据源（无直链）；Piped / Invidious 为
+# 直链解析源，可指向自托管实例覆盖默认集（Invidious 默认不启用）
+# YOUTUBE_API_KEY=your_key
+# YOUTUBE_PIPED_HOSTS=https://piped.example.com,...
+# YOUTUBE_INVIDIOUS_HOSTS=https://inv.example.com,...
+# YOUTUBE_API_TIMEOUT_MS=5000
+# YOUTUBE_SOURCE_TIMEOUT_MS=6000
+
+# 音乐聚合上游（/api/music，GD 契约）：MUSIC_API_BASES（逗号 / 空白分隔，按序回退）
+# 优先于单基址 MUSIC_API_BASE；不配置时默认公共实例 music-api.gdstudio.xyz
+# MUSIC_API_BASE=https://your-gd-api.example.com/api.php
+# MUSIC_API_BASES=https://a.example.com/api.php, https://b.example.com/api.php
+
+# 洛雪(lx)自定义音源（/api/music/lx）。脚本来源三种方式可叠加：
+#   1) MUSIC_LX_SCRIPTS：URL / file:// / 本地路径，多个以逗号 / 空格分隔，
+#      或 JSON 数组 [{"id":"qsvip","url":"https://..."}]（含空格的路径请用 JSON 数组）；
+#   2) MUSIC_LX_SCRIPTS_DIR：目录，目录内每个 *.js 按文件名作为一个脚本；
+#   3) 两者都未设置时自动扫描仓库根目录 .lxref/scripts/*.js（“放入即生效”）。
+# TTL 控制脚本源码刷新间隔（默认 6h）。
+# MUSIC_LX_SCRIPTS=https://example.com/lx-source.js
+# MUSIC_LX_SCRIPTS_DIR=/opt/lx-scripts
+# MUSIC_LX_SCRIPT_TTL_MS=21600000
+
+# 自研直连搜索（/api/music/self）：代码内直连实现（签名/deviceId 等自研构造），
+# 无需额外环境变量；覆盖 netease/kuwo/tencent/kugou/migu 五家（netease/kuwo 为搜索
+# 主通道，GD 搜索引擎仅兜底；tencent/kugou/migu 为独立搜索源 chips）。
 
 # 解析行为统计（Turso/libsql；未配置时记录功能自动禁用）
 TURSO_DB_URL=libsql://your-db.turso.io

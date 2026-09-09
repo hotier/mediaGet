@@ -8,8 +8,9 @@
  *                      （163cn.tv / t1.kugou.com / c.y.qq.com），由 resolve 路由处理。
  *
  * 平台支持梯度（对齐 app/api/music/resolve/route.js）：
- *   netease  —— 可解析到播放（详情走网易官方 JSON、直链走 GD 源）；
- *   tencent / kugou / kuwo —— 可识别并返回平台/ID，直链引擎接入后点亮。
+ *   netease / tencent / kuwo —— 可解析到播放：详情分别走各平台官方元数据通道，
+ *                      直链统一走 GD 源（netease songId / tencent songmid / kuwo rid）；
+ *   kugou —— 可识别并返回平台/ID（hash），酷狗直链引擎接入后点亮。
  */
 
 export type MusicPlatformKey = "netease" | "tencent" | "kugou" | "kuwo";
@@ -23,9 +24,9 @@ export interface MusicPlatformMeta {
 
 export const MUSIC_PLATFORMS: MusicPlatformMeta[] = [
   { key: "netease", label: "网易云音乐", resolve: "ready" },
-  { key: "tencent", label: "QQ音乐", resolve: "pending" },
+  { key: "tencent", label: "QQ音乐", resolve: "ready" },
   { key: "kugou", label: "酷狗音乐", resolve: "pending" },
-  { key: "kuwo", label: "酷我音乐", resolve: "pending" },
+  { key: "kuwo", label: "酷我音乐", resolve: "ready" },
 ];
 
 export const MUSIC_PLATFORM_LABEL: Record<MusicPlatformKey, string> = {

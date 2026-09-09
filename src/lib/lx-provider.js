@@ -6,15 +6,25 @@
  *   - provider=lx   ：本文件实现，把配置的洛雪生态自定义音源脚本（qdy/qsvip 类）
  *                     变成 /api/music/lx 下的统一动作接口（搜索/直链/歌词）。
  *
- * 启用：环境变量 MUSIC_LX_SCRIPTS 填脚本 URL（支持英文逗号 / 空格分隔多个，
- * 也支持 JSON 数组 [{ "id": "qdy", "url": "https://..." }]）。源脚本只跑在
- * nodejs runtime（本机 / Vercel / Docker），Cloudflare Workers 上不可用。
+ * 启用（三种方式可叠加）：
+ *   - 环境变量 MUSIC_LX_SCRIPTS 填脚本 URL / 本地文件路径（支持英文逗号、空格分隔多个，
+ *     也支持 JSON 数组 [{ "id": "qdy", "url": "https://..." }]；本地文件建议用 JSON 数组，
+ *     以便路径含空格也不受影响）；
+ *   - 环境变量 MUSIC_LX_SCRIPTS_DIR 指向一个目录，目录内每个 *.js 视为一个音源脚本；
+ *   - 未设置 MUSIC_LX_SCRIPTS_DIR 时，若仓库根目录存在 .lxref/scripts/ 目录，
+ *     则自动加载其中的全部 *.js（开发本机 / Docker 放入即生效）。
+ * 源脚本只跑在 nodejs runtime（本机 / Vercel / Docker），Cloudflare Workers 上不可用。
  *
  * 动作编排：
  *   - 脚本初始化时上报 sources（key → { name, type, actions, qualitys }），
  *     provider 据此判断某个 source 属于哪个脚本并做路由；
- *   - 脚本源码按 URL 进程内缓存（TTL 由 MUSIC_LX_SCRIPT_TTL_MS 控制，默认 6h）；
+ *   - 脚本源码按 URL / 本地路径进程内缓存（TTL 由 MUSIC_LX_SCRIPT_TTL_MS 控制，默认 6h）；
  *   - 脚本加载失败/脚本对某 action 报错时以 LxProviderError 抛出，route 层归类。
+ *
+ * 内置平台「音源兜底取直链」：netease/tencent/kuwo/kugou/migu 曲目在自身通道取直链失败
+ * （VIP 受限等）或无内置引擎时，可改由音源脚本按同曲 id 换链（映射默认 wy/tx/kw/kg/mg，
+ * 可用 MUSIC_LX_URL_FALLBACKS 覆盖/关闭，见 readUrlFallbackConfig；是否启用同时取决于
+ * 已加载脚本确实注册了对应 source 且带 musicUrl）。映射结果经 sources 目录 urlFallbacks 下发。
  *
  * 本文件可独立单测（脚本拉取实现允许注入，见 setLxScriptFetcherForTest）。
  */
@@ -163,25 +173,112 @@ export class LxProviderError extends Error {
 }
 
 const CONFIG_SOURCE_ENV = "MUSIC_LX_SCRIPTS";
+const CONFIG_DIR_ENV = "MUSIC_LX_SCRIPTS_DIR";
 const CONFIG_TTL_ENV = "MUSIC_LX_SCRIPT_TTL_MS";
+const CONFIG_FALLBACK_ENV = "MUSIC_LX_URL_FALLBACKS";
 
-/** 每项脚本进程内状态 */
-const registry = new Map(); // id -> entry
+/**
+ * 「内置平台曲目 → 音源脚本 source key」的取直链兜底默认映射
+ * （对标 全豆要/pdone 一类聚合音源脚本声明的 key：wy/tx/kw/kg/mg）。
+ * 仅当对应 source 已被可用脚本注册、且带 musicUrl/url action 时才生效。
+ */
+const DEFAULT_URL_FALLBACKS = Object.freeze({
+  netease: "wy",
+  tencent: "tx",
+  kuwo: "kw",
+  kugou: "kg",
+  migu: "mg",
+});
 
-/** 测试钩子：注入脚本拉取实现（默认 global fetch） */
-let scriptFetcher = async (url) => {
-  const res = await fetch(url, { signal: AbortSignal.timeout(SCRIPT_FETCH_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`脚本下载失败 HTTP ${res.status}`);
-  return res.text();
-};
-export function setLxScriptFetcherForTest(fn) {
-  scriptFetcher = typeof fn === "function" ? fn : scriptFetcher;
+/**
+ * 平台 → lx source 兜底映射配置：默认值之上允许环境变量覆盖：
+ *   MUSIC_LX_URL_FALLBACKS 支持 JSON 对象 {"netease":"wy",...} 或 "netease=wy,tencent=tx,kuwo=0"；
+ *   value 为 0/false/none/空 表示关闭该平台兜底。
+ */
+function readUrlFallbackConfig() {
+  const map = { ...DEFAULT_URL_FALLBACKS };
+  const raw = (process.env[CONFIG_FALLBACK_ENV] || "").trim();
+  if (!raw) return map;
+  let entries = [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      entries = Object.entries(parsed);
+    }
+  } catch {
+    /* 非 JSON → 按 k=v 列表解析 */
+  }
+  if (!entries.length) {
+    entries = raw
+      .split(/[,，;；]/)
+      .map((part) => part.split(/[=:：]/))
+      .filter((parts) => parts.length >= 2 && parts[0].trim());
+  }
+  for (const [key, value] of entries) {
+    const platform = String(key).trim().toLowerCase();
+    const target = String(value).trim().toLowerCase();
+    if (!platform) continue;
+    if (!target || target === "0" || target === "false" || target === "none") {
+      delete map[platform];
+    } else {
+      map[platform] = target;
+    }
+  }
+  return map;
 }
-export function resetLxScriptRegistryForTest() {
-  registry.clear();
+
+/** 只保留「可用脚本已注册且带 musicUrl」的映射项（平台顺序稳定、按序去重） */
+export function resolveUrlFallbacks() {
+  const map = readUrlFallbackConfig();
+  const urlKeys = new Set();
+  for (const s of lxSourcesSnapshot()) {
+    if (s.actions.includes("musicUrl") || s.actions.includes("url")) urlKeys.add(s.key);
+  }
+  const out = [];
+  for (const [platform, source] of Object.entries(map)) {
+    if (!urlKeys.has(source)) continue;
+    out.push({ platform, source });
+  }
+  return out;
 }
 
-/** 把环境变量里的脚本配置解析为 [{ id, url }] */
+/**
+ * 默认本地脚本目录（相对进程 cwd）。本地开发在仓库根目录建 .lxref/scripts/ 放入脚本，
+ * Docker 部署时把该目录 COPY 进镜像同路径即可，无需再配环境变量。
+ */
+const DEFAULT_LOCAL_SCRIPTS_DIR = ".lxref/scripts";
+
+/** 判断某个引用是否支持：http(s) / file:// / 本地 *.js 路径 */
+function isSupportedScriptRef(ref) {
+  if (!ref || typeof ref !== "string") return false;
+  if (/^https?:\/\//i.test(ref)) return true;
+  if (/^file:\/\//i.test(ref)) return true;
+  // 本地路径兜底：形如 x.js / a/b.js / D:\a\b.js 的相对或绝对路径
+  return /\.js(?:\?[^/?#]*)?$/i.test(ref);
+}
+
+/** 从 URL 或本地路径推导默认脚本 id（可读、稳定，失败时退回下标） */
+function defaultScriptIdFor(ref, index) {
+  const clean = ref.split(/[?#]/)[0];
+  const file = clean.split(/[\\/]/).pop() || "";
+  const base = file.replace(/\.js$/i, "");
+  if (/^https?:\/\//i.test(ref)) {
+    try {
+      const u = new URL(ref);
+      return `${u.hostname}-${base || "script"}`;
+    } catch {
+      /* 落到通用规则 */
+    }
+  }
+  return base ? `lx-${base}` : `lx-script-${index}`;
+}
+
+function sanitizeScriptId(id) {
+  const s = String(id || "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "");
+  return s || "";
+}
+
+/** 把环境变量里的脚本配置解析为 [{ id, url }]（仅同步判断，不做文件系统访问） */
 function readScriptConfig() {
   const raw = (process.env[CONFIG_SOURCE_ENV] || "").trim();
   if (!raw) return [];
@@ -203,21 +300,102 @@ function readScriptConfig() {
       url = String(it.url || "");
       id = String(it.id || "");
     }
-    if (!/^https?:\/\//i.test(url)) return;
-    if (!id) {
-      try {
-        const u = new URL(url);
-        const file = (u.pathname.split("/").pop() || "script").replace(/\.js$/i, "");
-        id = file ? `${u.hostname}-${file}` : `lx-script-${i}`;
-      } catch {
-        id = `lx-script-${i}`;
-      }
-    }
-    id = id.replace(/[^A-Za-z0-9._-]/g, "-");
+    if (!isSupportedScriptRef(url)) return;
+    if (!id) id = defaultScriptIdFor(url, i);
+    id = sanitizeScriptId(id) || `lx-script-${i}`;
     if (seen.has(id)) return;
     seen.add(id);
     out.push({ id, url });
   });
+  return out;
+}
+
+/** 每项脚本进程内状态 */
+const registry = new Map(); // id -> entry
+
+/** 默认脚本拉取实现：http(s) 走 fetch，file:///本地路径读文件（Node runtime） */
+const defaultScriptFetcher = async (url) => {
+  if (/^https?:\/\//i.test(url)) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(SCRIPT_FETCH_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`脚本下载失败 HTTP ${res.status}`);
+    return res.text();
+  }
+  return readLocalTextFile(url);
+};
+
+let scriptFetcher = defaultScriptFetcher;
+/** 测试钩子：注入脚本拉取实现；传 null 恢复默认实现（http(s)/本地文件均可用） */
+export function setLxScriptFetcherForTest(fn) {
+  scriptFetcher = typeof fn === "function" ? fn : defaultScriptFetcher;
+}
+export function resetLxScriptRegistryForTest() {
+  registry.clear();
+}
+
+/** nodejs 下读取本地脚本文件；不支持文件系统的运行时（如 edge）直接抛错交给调用方归类 */
+async function readLocalTextFile(ref) {
+  const fs = await import("node:fs/promises");
+  const pathMod = await import("node:path");
+  let filePath = ref;
+  if (/^file:\/\//i.test(ref)) {
+    const { fileURLToPath } = await import("node:url");
+    filePath = fileURLToPath(new URL(ref));
+  } else if (!pathMod.isAbsolute(ref)) {
+    filePath = pathMod.resolve(process.cwd(), ref);
+  }
+  return fs.readFile(filePath, "utf8");
+}
+
+/**
+ * 本地脚本目录配置：MUSIC_LX_SCRIPTS_DIR 指定目录时扫描该目录；
+ * 未指定时若默认目录 .lxref/scripts 存在则自动扫描。返回 [{ id, url }]。
+ */
+async function readDirScriptConfig() {
+  const explicitDir = String(process.env[CONFIG_DIR_ENV] || "").trim();
+  // 默认目录（.lxref/scripts）只是“开发/Docker 放入即生效”的约定，不存在时静默跳过；
+  // 显式配置 MUSIC_LX_SCRIPTS_DIR 后目录不可用则视为错误（避免配置失效被悄悄吞掉）
+  const dir = explicitDir || DEFAULT_LOCAL_SCRIPTS_DIR;
+  let fsMod;
+  try {
+    fsMod = await import("node:fs/promises");
+  } catch {
+    return []; // 无 node:fs（edge）时目录方式不可用，静默跳过
+  }
+  const pathMod = await import("node:path");
+  const abs = pathMod.isAbsolute(dir) ? dir : pathMod.resolve(process.cwd(), dir);
+  let names;
+  try {
+    names = await fsMod.readdir(abs, { withFileTypes: true });
+  } catch (err) {
+    // 默认目录不存在属正常（尚未放脚本）；显式配置的目录缺失则提示
+    if (err && (err.code === "ENOENT" || err.code === "ENOTDIR")) {
+      if (!explicitDir) return [];
+      throw new Error(`MUSIC_LX_SCRIPTS_DIR 目录不存在或不可读：${dir}（${err.code}）`);
+    }
+    throw err;
+  }
+  const files = names
+    .filter((d) => d.isFile() && /\.js$/i.test(d.name))
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
+  return files.map((name, i) => ({
+    id: sanitizeScriptId(name.replace(/\.js$/i, "")) || `lx-script-${i}`,
+    url: pathMod.join(abs, name),
+  }));
+}
+
+/** 汇总全部脚本配置（MUSIC_LX_SCRIPTS 优先，同名 id 只保留第一份） */
+async function readAllScriptConfigs() {
+  const seen = new Set();
+  const out = [];
+  const sources = [readScriptConfig(), await readDirScriptConfig()];
+  for (const cfg of sources) {
+    for (const item of cfg) {
+      if (!item.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
   return out;
 }
 
@@ -273,7 +451,7 @@ async function loadEntry(entry) {
 
 /** 按需加载全部配置脚本（进程内缓存，TTL 内不重复拉取；失败后按冷却期重试） */
 export async function ensureLxScripts() {
-  const entries = readScriptConfig();
+  const entries = await readAllScriptConfigs();
   const tasks = entries.map((cfg) => {
     let entry = registry.get(cfg.id);
     if (!entry) {
@@ -398,5 +576,6 @@ export async function getLxCatalog() {
     scripts: lxScriptsSnapshot(),
     sources: lxSourcesSnapshot(),
     searchSources: lxSearchableSources(),
+    urlFallbacks: resolveUrlFallbacks(),
   };
 }

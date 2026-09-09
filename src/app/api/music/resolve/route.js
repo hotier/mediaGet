@@ -23,6 +23,13 @@ import {
   isFollowableShareUrl,
   parseMusicLink,
 } from "@/lib/music-link";
+import {
+  buildKuwoInfoUrl,
+  KUWO_META_HEADERS,
+  normalizeKuwoRid,
+  parseKuwoInfo,
+} from "@/lib/kuwo-meta";
+import { buildSongInfoUrl, parseSongInfo, buildAlbumCoverUrl } from "@/lib/qqmusic";
 
 export const runtime = "nodejs";
 
@@ -39,11 +46,14 @@ export const runtime = "nodejs";
  *   2. 对官方分享短链（163cn.tv / t1.kugou.com / c.y.qq.com）跟随一次重定向再识别；
  *   3. 不支持的 host / 无法提取 ID → 400 返回受支持说明。
  *
- * 平台分支：
- *   netease  —— 请求网易官方 song/detail 补齐元数据（成功缓存 5 分钟）；
- *               详情通道失败不致命，降级为「ID 占位标题」仍可播放/下载（metadata=fallback）；
- *               直链由播放端按 id 实时取，不在本接口内预取。
- *   tencent / kugou / kuwo —— 识别成功即返回 engine-missing 状态与引导文案（引擎接入后排期点亮）。
+ * 平台分支（平台直链引擎 = 元数据通道 + GD 直链通道的组合）：
+ *   netease  —— 元数据走网易官方 song/detail；直链由 GD source=netease（songId）。
+ *   tencent  —— 元数据走 c.y.qq.com songinfo（songmid，免签名）；直链由 GD source=tencent。
+ *   kuwo     —— 元数据走 m.kuwo.cn H5 songinfo（rid，免鉴权）；直链由 GD source=kuwo。
+ *   三者的详情通道失败均不致命：降级为「ID 占位标题」仍可播放/下载（metadata=fallback）；
+ *   详情成功结果进程内缓存 5 分钟。
+ *   kugou    —— 识别成功即返回 engine-missing 状态（GD 上游不提供 kugou source，
+ *               待自建酷狗直链引擎后一并点亮）。
  *
  * 响应契约（HTTP 恒 200，业务态在 data.status）：
  *   playable      { status, platform, songId, metadata: "full"|"fallback", item: SearchItem }
@@ -53,10 +63,53 @@ export const runtime = "nodejs";
 
 const LINK_MAX_LEN = 2000;
 const REDIRECT_TIMEOUT = 7000;
+const META_TIMEOUT = 8000;
 
-/** 识别网易详情缓存 key（仅元数据成功时写缓存） */
-function metaCacheKey(songId) {
-  return `netease:detail:${songId}`;
+/** QQ 官方歌曲信息接口请求头（与 qqmusic-id.js 同源） */
+const QQ_META_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  Accept: "application/json, text/plain, */*",
+  Referer: "https://y.qq.com/",
+};
+
+/** QQ 曲目 ID（songmid）宽容校验：与 music-link 的提取口径一致（字母数字 4~30 位） */
+const QQ_SONGMID_RE = /^[0-9A-Za-z]{4,30}$/;
+
+/** 详情成功结果缓存前缀（netease / tencent / kuwo 各一套） */
+const META_CACHE_SCOPE = {
+  netease: "netease",
+  tencent: "tencent",
+  kuwo: "kuwo",
+};
+
+/** 元数据缺失时的占位标题前缀（与源站叫法一致） */
+const FALLBACK_TITLE_PREFIX = {
+  netease: "网易云歌曲",
+  tencent: "QQ音乐歌曲",
+  kuwo: "酷我歌曲",
+};
+
+/** 平台详情缓存 key：netease:detail:<id> / tencent:detail:<mid> / kuwo:detail:<rid> */
+function metaCacheKey(scope, songId) {
+  return `${scope}:detail:${songId}`;
+}
+
+/**
+ * 元数据 GET：超时 / 非 200 / 非 JSON → null（不抛错，由调用方走“元数据缺失”降级）。
+ */
+async function fetchMetaJson(url, headers) {
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(META_TIMEOUT),
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch (error) {
+    logger.warn(`music resolve meta fetch error: ${error.message}`);
+    return null;
+  }
 }
 
 /** 从分享文本走到「平台 + 曲目 ID」，识别不出返回 null（含短链重定向跟随） */
@@ -79,6 +132,49 @@ async function identifyLink(rawLink) {
     }
   }
   return parsed;
+}
+
+/**
+ * 组 playable 响应。meta 为统一形态的元数据对象（null = 详情缺失，走 ID 占位标题）；
+ * 直链不在本接口预取，由播放端按 item.source + id 经既有 /api/music 链路实时取。
+ */
+function playableResponse(
+  corsHeaders,
+  { platform, songId, meta, placeholderPrefix },
+  startTime
+) {
+  const metadata = meta ? "full" : "fallback";
+  const label = MUSIC_PLATFORM_LABEL[platform];
+  const item = {
+    id: songId,
+    urlId: songId,
+    lyricId: songId,
+    name: meta ? meta.name : `${placeholderPrefix} ${songId}`,
+    artist: meta ? meta.artist : [],
+    album: meta ? meta.album : "",
+    // 详情封面为图床直链，前端封面渲染优先使用（跳过 GD pic 换取）
+    picUrlDirect: meta ? meta.coverUrl : "",
+    source: platform,
+  };
+  console.log(
+    `[music-resolve] time=${beijingNow()} code=200 status=ok platform=${platform} songId=${songId} metadata=${metadata} duration=${
+      Date.now() - startTime
+    }ms`
+  );
+  return Response.json(
+    {
+      code: 200,
+      msg: "解析成功",
+      data: {
+        status: "playable",
+        platform,
+        songId,
+        metadata,
+        item,
+      },
+    },
+    { status: 200, headers: corsHeaders }
+  );
 }
 
 export async function GET(request) {
@@ -127,14 +223,13 @@ export async function GET(request) {
   // 1) 识别（含官方短链跟随一次重定向）
   const parsed = await identifyLink(rawLink);
   if (!parsed) {
-    const ready = MUSIC_PLATFORM_LABEL.netease;
     return Response.json(
       {
         code: 400,
-        msg: `未能从链接中识别出歌曲：当前仅支持 ${ready} 歌曲链接直接解析，QQ音乐 / 酷狗 / 酷我链接可识别但直链引擎尚未接入；请粘贴歌曲的详情页链接（非歌单 / 歌手主页 / 视频页）`,
+        msg: `未能从链接中识别出歌曲：当前支持 网易云 / QQ音乐 / 酷我 歌曲链接直接解析，酷狗歌曲链接可识别但直链引擎尚未接入；请粘贴歌曲的详情页链接（非歌单 / 歌手主页 / 视频页）`,
         supported: {
-          ready: ["netease"],
-          pending: ["tencent", "kugou", "kuwo"],
+          ready: ["netease", "tencent", "kuwo"],
+          pending: ["kugou"],
         },
       },
       { status: 400, headers: corsHeaders }
@@ -144,7 +239,7 @@ export async function GET(request) {
   const { platform, songId } = parsed;
   const label = MUSIC_PLATFORM_LABEL[platform];
 
-  // 2) 分支：网易云 —— 取官方详情补齐元数据，直链由播放端实时取
+  // 2) 分支：网易云 —— 官方 song/detail 补齐元数据，直链由播放端实时取（GD source=netease）
   if (platform === "netease") {
     const normalizedSongId = normalizeNeteaseSongId(songId);
     if (!normalizedSongId) {
@@ -158,7 +253,7 @@ export async function GET(request) {
     }
 
     let meta = null;
-    const cacheKey = metaCacheKey(normalizedSongId);
+    const cacheKey = metaCacheKey(META_CACHE_SCOPE.netease, normalizedSongId);
     const cached = getCachedResponse(cacheKey);
     if (cached && typeof cached.meta === "object") {
       meta = cached.meta;
@@ -184,36 +279,129 @@ export async function GET(request) {
       }
     }
 
-    const metadata = meta ? "full" : "fallback";
-    const item = {
-      id: normalizedSongId,
-      urlId: normalizedSongId,
-      lyricId: normalizedSongId,
-      name: meta ? meta.name : `网易云歌曲 ${normalizedSongId}`,
-      artist: meta ? meta.artist : [],
-      album: meta ? meta.album : "",
-      source: "netease",
-      // 详情封面为图床直链，前端封面渲染优先使用（跳过 GD pic 换取）
-      picUrlDirect: meta ? meta.coverUrl : "",
-    };
-    logResolve("ok", 200, `platform=netease songId=${normalizedSongId} metadata=${metadata}`);
+    return playableResponse(
+      corsHeaders,
+      {
+        platform: "netease",
+        songId: normalizedSongId,
+        meta,
+        placeholderPrefix: FALLBACK_TITLE_PREFIX.netease,
+      },
+      startTime
+    );
+  }
+
+  // 3) 分支：QQ音乐 —— c.y.qq.com songinfo 补齐元数据，直链由播放端实时取（GD source=tencent）
+  if (platform === "tencent") {
+    if (!QQ_SONGMID_RE.test(songId)) {
+      return Response.json(
+        {
+          code: 400,
+          msg: `链接中的QQ音乐歌曲 ID 不合法：${songId}`,
+        },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    let meta = null;
+    const cacheKey = metaCacheKey(META_CACHE_SCOPE.tencent, songId);
+    const cached = getCachedResponse(cacheKey);
+    if (cached && typeof cached.meta === "object") {
+      meta = cached.meta;
+    } else {
+      const json = await fetchMetaJson(
+        buildSongInfoUrl({ songmid: songId }),
+        QQ_META_HEADERS
+      );
+      const parsedMeta = parseSongInfo(json);
+      if (parsedMeta) {
+        meta = {
+          name: parsedMeta.name,
+          artist: parsedMeta.singers,
+          album: parsedMeta.albumName,
+          coverUrl: buildAlbumCoverUrl(parsedMeta.albumMid),
+        };
+        setCacheResponse(cacheKey, { meta });
+      } else {
+        logger.warn(`qq songinfo unusable or not found songmid=${songId}`);
+      }
+    }
+
+    return playableResponse(
+      corsHeaders,
+      {
+        platform: "tencent",
+        songId,
+        meta,
+        placeholderPrefix: FALLBACK_TITLE_PREFIX.tencent,
+      },
+      startTime
+    );
+  }
+
+  // 4) 分支：酷我 —— m.kuwo.cn H5 songinfo 补齐元数据，直链由播放端实时取（GD source=kuwo）
+  if (platform === "kuwo") {
+    const normalizedRid = normalizeKuwoRid(songId);
+    if (!normalizedRid) {
+      return Response.json(
+        {
+          code: 400,
+          msg: `链接中的酷我歌曲 ID 不合法：${songId}`,
+        },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    let meta = null;
+    const cacheKey = metaCacheKey(META_CACHE_SCOPE.kuwo, normalizedRid);
+    const cached = getCachedResponse(cacheKey);
+    if (cached && typeof cached.meta === "object") {
+      meta = cached.meta;
+    } else {
+      const json = await fetchMetaJson(
+        buildKuwoInfoUrl(normalizedRid),
+        KUWO_META_HEADERS
+      );
+      const parsedMeta = parseKuwoInfo(json);
+      if (parsedMeta.ok) {
+        meta = parsedMeta.meta;
+        setCacheResponse(cacheKey, { meta: parsedMeta.meta });
+      } else {
+        logger.warn(`kuwo songinfo unusable or not found rid=${normalizedRid}`);
+      }
+    }
+
+    return playableResponse(
+      corsHeaders,
+      {
+        platform: "kuwo",
+        songId: normalizedRid,
+        meta,
+        placeholderPrefix: FALLBACK_TITLE_PREFIX.kuwo,
+      },
+      startTime
+    );
+  }
+
+  // 5) 分支：酷狗 —— 识别成功，直链引擎（自建直链通道 + 元数据）未接入
+  if (platform === "kugou") {
+    logResolve("engine-missing", 200, `platform=kugou songId=${songId}`);
     return Response.json(
       {
         code: 200,
-        msg: "解析成功",
+        msg: "识别成功，该平台直链引擎暂未接入",
         data: {
-          status: "playable",
-          platform: "netease",
-          songId: normalizedSongId,
-          metadata,
-          item,
+          status: "engine-missing",
+          platform,
+          songId,
+          message: `已识别为「${label}」歌曲（hash：${songId}），但酷狗直链解析引擎尚未接入，暂无法解析播放；网易云 / QQ音乐 / 酷我 歌曲链接当前即可直接解析`,
         },
       },
       { status: 200, headers: corsHeaders }
     );
   }
 
-  // 3) 分支：QQ / 酷狗 / 酷我 —— 识别成功，直链引擎未接入
+  // 6) 兜底（理论上到不了）：按 engine-missing 处理
   logResolve("engine-missing", 200, `platform=${platform} songId=${songId}`);
   return Response.json(
     {
@@ -223,7 +411,7 @@ export async function GET(request) {
         status: "engine-missing",
         platform,
         songId,
-        message: `已识别为「${label}」歌曲（ID：${songId}），但该平台的直链解析引擎尚未接入，暂无法解析播放；网易云歌曲链接当前即可直接解析`,
+        message: `已识别为「${label}」歌曲（ID：${songId}），但该平台的直链解析引擎尚未接入，暂无法解析播放；网易云 / QQ音乐 / 酷我 歌曲链接当前即可直接解析`,
       },
     },
     { status: 200, headers: corsHeaders }

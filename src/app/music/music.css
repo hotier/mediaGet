@@ -170,6 +170,34 @@
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* 播放失败 → 自动换源进行态（resolve / play 双失败闭环进行中） */
+.mp-alt-progress {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  transform: translateX(-50%);
+  z-index: 61;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(86vw, 480px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(24, 26, 34, 0.92);
+  border: 1px solid rgba(255, 196, 0, 0.55);
+  color: #fff;
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  animation: mp-toast-in 0.22s ease-out;
+}
+.mp-alt-progress svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: #ffc400;
+}
+
 /* ---------- 主体：左列表 / 右正在播放 ---------- */
 .mp-body {
   flex: 1;
@@ -306,6 +334,19 @@
   width: 8px;
   height: 8px;
   box-shadow: 0 0 6px color-mix(in srgb, var(--sc) 70%, transparent);
+}
+/* 内置自研直连搜索源 chip：品牌色实心圆点（区别于 GD 内置源的 logo 与 lx 扩展源的虚线边） */
+.mp-src-chip.mp-src-chip-self .dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc) 16%, transparent);
+}
+/* 「聚合搜索」伪 chip（行首，非真实音源）：品牌主色方形点 + 圆环，与平台圆点区分 */
+.mp-src-chip.mp-src-chip-agg .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mp-primary) 16%, transparent);
 }
 
 .mp-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
@@ -1110,8 +1151,9 @@
   .mp-player .mp-ctrls { gap: 4px; }
   .mp-player .mp-ctrls > :first-child { display: none; } /* 上一首 */
   .mp-player .mp-ctrls > :nth-child(4) { display: none; } /* 单曲循环 */
-  .mp-player .mp-brp { display: none; } /* 音质切换 */
-  .mp-toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+  .mp-player   .mp-brp { display: none; } /* 音质切换 */
+  .mp-toast,
+  .mp-alt-progress { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
   .mp-ptime { display: none; }
   .mp-hero h1 { font-size: 24px; }
 }
@@ -2114,3 +2156,194 @@
 }
 .mp-resolve-tip strong { color: var(--mp-primary); font-weight: 600; }
 .mp-resolve-tip .dim { opacity: 0.82; }
+
+/* ============================================================
+   播放失败 → 同曲其他版本（人工选版面板）
+   自动换源收尾仍失败且队列里有未尝试过的同曲候选时弹出：
+   每一行 = 一个队列内版本（来源徽标 + 歌名 + 歌手 + 专辑），
+   整行可点即「就播这版」；非高置信（专辑不一致）候选带提示注释。
+   ============================================================ */
+.mp-alt-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 12, 18, 0.46);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  animation: mp-info-fade 0.16s ease-out;
+}
+.mp-alt-card {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(640px, calc(100vh - 48px));
+  padding: 18px 18px 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--background) 96%, transparent);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  animation: mp-alt-pop 0.18s ease-out;
+}
+@keyframes mp-alt-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mp-alt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.mp-alt-headtext { flex: 1; min-width: 0; }
+.mp-alt-caption {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.mp-alt-caption svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: #f59e0b;
+}
+.mp-alt-reason {
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.mp-alt-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mp-alt-close:hover { background: var(--mp-hover); color: var(--text-primary); }
+.mp-alt-close:focus-visible { outline: 2px solid var(--mp-primary); outline-offset: 1px; }
+.mp-alt-close svg { width: 15px; height: 15px; }
+.mp-alt-list {
+  margin: 14px -6px 0;
+  padding: 0 6px 2px;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-alt-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.mp-alt-item:hover { background: var(--mp-hover); }
+.mp-alt-item:focus-visible { outline: 2px solid var(--mp-primary); outline-offset: -2px; }
+.mp-alt-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 110px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--mp-soft);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.mp-alt-src svg { flex: none; width: 13px; height: 13px; }
+/* “跨源现搜”候选徽标：区分于队列内（来源 A）候选，帮助用户理解条目来自现搜 */
+.mp-alt-src .mp-alt-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mp-primary) 14%, transparent);
+  color: var(--mp-primary);
+  font-size: 10px;
+  line-height: 15px;
+}
+.mp-alt-main { min-width: 0; }
+.mp-alt-main .t {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mp-alt-main .a {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mp-alt-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-style: normal;
+  color: #b45309;
+}
+.dark .mp-alt-note { color: #fbbf24; }
+.mp-alt-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--mp-primary);
+  color: #fff;
+  opacity: 0.9;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.mp-alt-go svg { width: 12px; height: 12px; }
+.mp-alt-item:hover .mp-alt-go { opacity: 1; transform: scale(1.06); }
+.mp-alt-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mp-divider);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* 移动端：选版面板贴边收缩 */
+@media (max-width: 700px) {
+  .mp-alt-mask { padding: 14px; }
+  .mp-alt-card { max-height: calc(100vh - 28px); }
+  .mp-alt-src { max-width: 90px; }
+}

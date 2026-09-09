@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { lineBaseLabel, musicLineMeta } from "@/lib/music-client";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  crossSearchPlayableSourceKeys,
+  lineBaseLabel,
+  musicLineMeta,
+  resetLxCatalogCache,
+  setLxCatalogCacheForTest,
+  type LxCatalogData,
+} from "@/lib/music-client";
 
 describe("music 结果「线路」标注（music-client）", () => {
   it("GD 公共实例基址归名为「GD 公共源」，自建基址按 host 展示", () => {
@@ -50,5 +57,53 @@ describe("music 结果「线路」标注（music-client）", () => {
     expect(musicLineMeta(undefined)).toBeNull();
     expect(musicLineMeta(null)).toBeNull();
     expect(musicLineMeta({ kind: "proxy", base: "" })).toBeNull();
+  });
+});
+
+describe("crossSearchPlayableSourceKeys（跨源现搜来源 B 的候选音源集合）", () => {
+  afterEach(() => {
+    resetLxCatalogCache();
+  });
+
+  it("未加载 lx 目录时 = 内置 GD 三源 + 可直链自研 tencent；kugou/migu 永不收录", () => {
+    expect(crossSearchPlayableSourceKeys()).toEqual([
+      "netease",
+      "kuwo",
+      "joox",
+      "tencent",
+    ]);
+  });
+
+  it("excludeSource 剔除失败源自身（避免同一源上重复现搜）", () => {
+    expect(crossSearchPlayableSourceKeys("netease")).toEqual([
+      "kuwo",
+      "joox",
+      "tencent",
+    ]);
+  });
+
+  it("lx 目录加载后，扩展可搜索源追加到集合尾部；声明同名内置源的条目被忽略", () => {
+    setLxCatalogCacheForTest({
+      enabled: true,
+      scripts: [{ id: "qdy", name: "qdy", url: "" }],
+      sources: [
+        { key: "qdy", name: "qdy", actions: { musicSearch: {} }, qualitys: ["128k"] },
+        { key: "netease", name: "网易云", actions: { musicSearch: {} }, qualitys: [] },
+      ],
+      searchSources: [
+        { key: "qdy", label: "qdy 源" },
+        { key: "netease", label: "网易云（内置重名）" },
+      ],
+      allSourceKeys: ["qdy", "netease"],
+    } as unknown as LxCatalogData);
+
+    const keys = crossSearchPlayableSourceKeys();
+    expect(keys).toContain("qdy"); // 新增的 lx 扩展源
+    expect(keys.indexOf("qdy")).toBeGreaterThanOrEqual(4); // 追加在末尾
+    // 目录里声明与内置重名的源不产生第二份：netease/kuwo 只出现一次
+    expect(keys.filter((k) => k === "netease")).toHaveLength(1);
+    expect(keys.filter((k) => k === "kuwo")).toHaveLength(1);
+    expect(keys).not.toContain("kugou");
+    expect(keys).not.toContain("migu");
   });
 });

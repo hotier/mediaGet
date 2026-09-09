@@ -1,85 +1,96 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件给在仓库内写代码/改代码的 AI 助手（Claude Code / CodeBuddy 等）提供工作指引。目标：改完代码后 `README.md`、`API.md`、`CLAUDE.md` 中描述的平台、接口、环境变量、目录职责依然与实际实现一致。
 
-## Project Overview
+## 项目概况
 
-ParseShort is a short video parsing and download service built with **Next.js 15** (App Router, React 19). It parses video links from 20+ social media platforms (Douyin, Kuaishou, Weibo, Bilibili, Xiaohongshu, etc., plus TikTok, X, Instagram and YouTube). The frontend is a single-page app; the backend is a collection of API route handlers.
+`mediaGet`（品牌「即刻解析」，线上 <https://get.hotier.cc.cd>）是一个 Next.js 15（App Router + React 19）解析下载站，含两大产品模块：
 
-## Commands
+1. **视频/图文/音乐内容解析（首页 `/`）**：支持 **21 个平台**（抖音、快手、微博、哔哩哔哩、小红书、汽水音乐、皮皮虾、皮皮搞笑、西瓜视频、最右、虎牙、AcFun、全民K歌、QQ音乐、六间房、新片场、好看视频、TikTok、X/Twitter、Instagram、YouTube），输入分享链接 / 整段分享文案 /（部分平台）`source+id`，自动识别平台与内容类型并输出无水印直链。
+2. **音乐解析中心（`/music`）**：多源聚合搜歌 / 试听 / 播放 / 歌词 / 封面 / 下载——默认 GD 聚合上游（`/api/music`，网易云/酷我/JOOX 等搜索）+ 自研直连搜索（`/api/music/self`，服务器直连腾讯/酷狗/咪咕等五家搜索，独立搜索源 chips）+ 洛雪(lx-music) 自定义音源（`/api/music/lx`）+ 歌曲链接解析（`/api/music/resolve`，网易云 / QQ音乐 / 酷我 ready，酷狗 pending）。
+
+另有静态页：FAQ（`/faq`）、法律页（`/legal/{terms,privacy,dmca}`）、`robots.ts` / `sitemap.ts`；全站 PWA、深浅主题（默认跟随系统）。
+
+技术形态：API 层与核心逻辑多为 **`.js`（ESM import/export）**，页面/组件/工具为 **TS/TSX**；前端是客户端会话式 SPA 页面（会话存 `sessionStorage`），后端是 API Route Handler，**除 `_diag/route.ts` 外全部为 `route.js`，且全部显式 `export const runtime = "nodejs"`**。
+
+## 常用命令
 
 ```bash
-npm run dev       # Dev server with Turbopack
-npm run build     # Production build
-npm start         # Start production server
-npm run lint      # ESLint (next lint)
-npm test          # Unit tests via Vitest (no network)
-npm run test:watch # Vitest in watch mode
-npm run test:live  # Live integration tests (requires RUN_LIVE_PARSE=1 + URLs in .env)
+npm run dev          # 开发（next dev --turbopack）
+npm run build        # 生产构建
+npm start            # 生产运行
+npm run lint
+npm test             # 单元测试（vitest run，纯本地无外网）
+npm run test:watch
+npm run test:live    # 真机解析测试（前缀 RUN_LIVE_PARSE=1，.env 需配 LIVE_URL_*）
+npm run build:cf     # OpenNext Cloudflare 构建（产物 .open-next/）
 ```
 
-Run a single test file: `npx vitest run tests/share.test.ts`
+单文件测试：`npx vitest run tests/share.test.ts`。真机测试目录 `tests/live/` 里另有音乐链接解析真机测试 `resolve-live.test.ts`（需显式 `RUN_LIVE_RESOLVE=1` 才跑，`npm run test:live` 不会带它）。live 测试都通过 `skipIf` 控制，不配 env 时默认跳过。
 
-## Architecture
+## 架构
 
-### Backend: Middleware + Per-Platform Parsers
+### 后端（`src/app/api/**`）
 
-All platform API routes (`src/app/api/{platform}/route.js`) follow the same pattern:
+**统一路由骨架**：平台/功能路由一律 `export const GET = createApiHandler(parseFn[, options])`；`createApiHandler`（`src/lib/api-middleware.ts`）把一个「纯解析函数」包装成完整 HTTP 接口，职责链依次为：CORS → IP 黑名单蜜罐（`lib/honeypot.ts`）→ IP 级限流 60 次/分（`lib/api-utils.js`）→ 平台级真实抓取节流（`lib/anti-bot.js`，默认 30 次/分/平台）→ URL 校验 + SSRF 白名单 → 解析执行 → `normalizeResult` 归一化统一契约 → 成功结果 5 分钟进程内缓存（`shouldCache`）→ `analytics.recordParse` 行为统计（Turso，可选）→ 统一错误响应；`fmt=text` 也由中间件统一处理。**不要绕过中间件自造轮子**，新增平台解析器只需返回 `{ code, msg, data }`。
 
-```
-export const GET = createApiHandler(parseFunction)
-```
+**统一入口**：`/api/parse`（GET/POST）与 `/api/parse-text`（纯 `text=` 文案的兼容别名）都是薄壳，真实逻辑在 `src/lib/parse-handler.js`：`unified-parser.js` 识别平台（`lib/platforms.ts` 的 `PLATFORM_INFO` 决定识别与 `source+id` 能力）→ `lib/blockedPlatforms.ts` 黑名单（微信视频号与付费/DRM 平台）→ 按 `lib/platformRoutes.js`（平台 key → route 的唯一映射）动态 import 解析器 → 解析后写入 **24h 共享结果缓存**（`lib/result-cache.js`，Cloudflare Cache API，命中时先探测主直链，404/410 死链自动重解析）。key 与目录名映射：小红书 `redbook` → `/api/xhs`，皮皮虾 `pipixia` → `/api/ppxia`，汽水音乐 `qsmusic` 走特判。
 
-`createApiHandler()` (in `src/lib/api-middleware.js`) wraps each parser with: optional Basic Auth, IP-based rate limiting (60 req/min), URL validation, SSRF protection, 5-minute in-memory cache, CORS, and error handling. The unified entry `/api/parse` additionally passes `sharedCache` — a 24-hour Cloudflare Cache API result cache (`src/lib/result-cache.js`) storing the platform-supplemented normalized result; on hit it probes the direct URL and re-parses when the cached link is definitively dead (404/410).
+**平台解析器风格**：多数是 route 内独立 async 函数（短链跟随 → 伪装 UA 抓页面/接口 → 提内嵌 JSON），快手是类（`lib/kuaishouCore.js`）。TikTok 走 `lib/tiktokDlp.js`（yt-dlp child_process，**仅 Docker/带二进制环境可用**）；YouTube 为纯 HTTP 多源竞速（`lib/youtube.js`，见下）；Instagram（`lib/instagram.js`）已全面登录墙，需 `IG_COOKIE`。
 
-Platform parsers are standalone async functions (not classes). They typically: follow short URL redirects → fetch HTML with spoofed User-Agents → extract video IDs → parse embedded JSON (`window._ROUTER_DATA`, `__APOLLO_STATE__`, etc.) → return structured JSON. The Kuaishou parser (`src/lib/kuaishouCore.js`) is the exception — it's a class with multi-strategy parsing.
+**音乐接口**：
+- `/api/music`（provider=gd）：`lib/gdmusic.js` 按 GD(gdstudio) 契约组装 `types=url/search/pic/lyric` 请求，`getUpstreamBases` 多基址按序回退（8s 总预算）。action 支持 `search/pic/lyric/url(默认)`；另有 `bin=1`（url→音频字节代理下载带音质标签文件名；pic→封面字节同源取色）与 `fmt=text`。搜索 action 仅开放 netease/kuwo/joox。
+- `/api/music/self`（自研直连搜索，仅 `action=search`）：`lib/self-search/`（index/errors + netease/tencent/kugou/kuwo/migu 每平台一模块，移植 lx-music musicSdk 并自研签名）服务器直连五家搜索 API，source 沿用 GD 命名，归一为 GD 搜索同契约 SearchItem（line 标注 `kind=self`）。三条价值：(1) tencent/kugou/migu 是 GD 未开放搜索的**独立搜索源 chips**；(2) netease/kuwo 双通道：搜索以本通道为主（自研失败才回退 GD 搜索引擎，并会话置位让后续翻页直接走 GD）；(3) 封面不强求——搜索响应能内嵌的写入 `picUrlDirect` 直接展示，不做二次换取。tencent/netease/kuwo 产物 id 与其 GD 直链通道所需 id 一致，可无缝复用直链/歌词/封面；kugou/migu 无内置直链引擎：前端点播/切音质统一走 music-client `requestPlayDirect`——先试 GD 主通道，失败或无引擎时按「平台→lx 音源 source」映射（默认 netease→wy、tencent→tx、kuwo→kw、kugou→kg、migu→mg，环境变量 `MUSIC_LX_URL_FALLBACKS` 可增改/关闭）自动改由音源脚本同曲取链；映射随 `/api/music/lx?action=sources` 的 urlFallbacks 下发，且仅当脚本确实注册了该 source 才生效。未配置映射/脚本时保持原「该音源自研搜索结果仅供识别，暂未接入试听直链引擎」提示。
+- `/api/music/lx`（provider=lx）：洛雪生态自定义音源。`lib/lx-provider.js` 管脚本配置（`MUSIC_LX_SCRIPTS` 的 URL / 本地路径条目 + `MUSIC_LX_SCRIPTS_DIR` 目录扫描 + 仓库 `.lxref/scripts/` 默认目录自动加载，同名 id 保留首份；调度含 TTL 缓存、并发执行、quality 映射），`lib/lx-host.js` 用 `node:vm` 沙箱执行第三方脚本（**脚本视为不可信代码**，只暴露白名单 `fetch` 代理，不得放 Node 原生能力）。action：`sources/search/url/lyric`。仅 Node runtime，无浏览器直连兜底。
+- `/api/music/resolve`：`lib/music-link.ts` 纯函数识别链接（SSRF 面收敛：不直接请求用户链接，官方短链 `163cn.tv` / `c.y.qq.com` 等服务端跟随一次重定向）→ 按平台直链引擎补元数据并产出 SearchItem，播放直链由 `/api/music` `action=url` 实时取（不预取）。网易 ready（`lib/netease-meta.js`，官方 song/detail）、QQ音乐 ready（`lib/qqmusic.js` songinfo，songmid 走 GD tencent 源）、酷我 ready（`lib/kuwo-meta.js`，m.kuwo.cn H5 songinfo，rid 走 GD kuwo 源）；各平台详情失败均降级占位标题仍可播（`metadata=fallback`），详情成功各自缓存 5 分钟。酷狗识别成功仍 `engine-missing`（GD 无 kugou source，直链通道未建），无法识别 400。
 
-The unified endpoint `/api/parse` auto-detects the platform from a URL and dynamically imports the correct parser. It runs on Edge runtime. Most routes use Edge runtime; the Douyin route explicitly uses Node.js runtime for Docker compatibility.
+**资源代理**：`/api/video-proxy`（视频流：按平台补 Referer 防盗链、Range/206、download=1、twitter CDN 特殊处理；超时/重试）与 `/api/image`（图片字节代理，内存 LRU 6h，小红书/微博/快手图床需带 Referer）。前端是否走代理由 `utils/videoProxy.ts` 判定。
 
-The proxy route (`/api/proxy/route.ts`) forwards media requests with appropriate Referer/Cookie headers, with special handling for Bilibili and Douyin CDNs.
+**辅助端点**：`/api/health`、`/api/config`（读 `VIDEO_PARSE_ENABLED`）、`/api/stats`（Turso 统计，需 `STATS_API_KEY`）、`/api/rate-limit`（查当前 IP 配额）、`/api/engines`（平台路由体检）、`/api/_diag`（临时诊断）。
 
-### Frontend: Single Page App
+### 前端
 
-- `src/components/VideoParserForm.tsx` — Main form: auto-reads clipboard, extracts URLs with debounce, auto-detects platform, caches results in sessionStorage
-- `src/components/videos/` — Platform-specific result display components, barrel-exported from `index.ts`
-- `src/utils/share.ts` — URL extraction from Chinese social media share text, platform detection
-- `src/config/video-platforms.ts` — Platform metadata (name, color, emoji) for UI
-- `src/lib/platforms.ts` — Platform registry with domain mapping (used server-side)
+- 页面：`src/app/page.tsx`（首页解析会话状态机 + 平台网格 + 结果卡 + `failType` 差异化错误展示）、`src/app/music/page.tsx`（MusicExplorer 全屏音乐播放器 + 歌词）、`faq`、`legal/*`。`layout.tsx` 含主题三段脚本与 JSON-LD/PWA manifest。
+- 表单与展示：`src/components/VideoParserForm.tsx`（剪贴板、防抖、平台指定）；`src/components/videos/` 每平台一个展示组件，`platform-renderers.tsx` 按平台/content 类型分发（图文图集多选下载、多分P清晰度、在线播放、复制直链）。
+- 音乐 UI：`src/components/music/MusicExplorer.tsx`、`MusicViewSeg`、`BrPicker` 等；请求层 `src/lib/music-client.ts`：同源代理优先 + GD 公共源直连兜底（仅 provider=gd 可直连），lx 一律走 `/api/music/lx`，自研直连搜索源 chips（tencent/kugou/migu）与 netease/kuwo 双通道（自研为主、GD 搜索引擎兜底）搜索都经 `/api/music/self` 分派。浏览器端用 **源通道引擎抽象**（`sourceEngineKindFor`/`sourceEngineCapsFor` 把 source 归入 `gd|lx|self`，`trackDownloadSpec`/`coverBinUrl` 决策 bin 字节下载 / 封面取色 URL）——UI 不得自己拼 `/api/music` URL 或读 `isDirectUsed`；搜索引擎注册视图由 `source-meta.ts` 的 `buildSearchChips`（内置 GD 源 + 内置自研直连源 + 动态 lx 目录）统一构建，`MusicExplorer`/各面板只消费 chips 与上述入口。**聚合搜索**：SearchPanel chips 行首「聚合搜索」伪 chip（`aggActive`）开启，一次 `searchAcrossSources`（music-client，平台级限流闸 ≤3 路并发、多次触发叠加也不超 3、逐源失败隔离）拉全部可用源第 1 页，`music-match.ts`（纯函数：文本清洗/关键词相关度打分/跨源同曲判定与去重）合并排序成混合列表；去重与打分规则与播放失败自动换源共用同一套实现。聚合列表无翻页、不落播放快照（来源混合无从恢复），部分源失败以 `pageErr` 尾部提示、全部失败给空态说明。**播放失败自动换源**由 `use-player-engine.ts` 收敛：resolve（取直链失败）与 play（`<audio>` 媒体层报错）双阶段都进入 token 化有界自动换源，只在当前队列内尝试同曲高置信候选（`autoTrying` 期间播放条上方显示进行态 pill），失败收尾时把「尚未自动尝试过」的候选以 `alternatives` 快照暴露给 UI——`MusicExplorer` 据此弹出 `AltSelectDialog` 人工选版（逐行 来源/歌名/歌手/专辑，点行 `playTrack` 重走闭环）。
+- `src/components/ui/` 是基于 shadcn/ui 规范生成的基础组件（CVA + tailwind-merge + 少量 radix primitives），改 UI 优先复用其中封装。
 
-### Key Lib Files
+### 关键 lib 一览（`src/lib/`）
 
-- `src/lib/api-utils.js` — Cache, rate-limit, SSRF protection, response helpers
-- `src/lib/redirect-location.ts` — Follow 3xx redirects for short URLs
+- 解析基础设施：`api-utils.js`（缓存/限流/URL校验/日志/北京时区/取客户端 IP）、`api-middleware.ts`、`normalize-result.ts`、`result-cache.js`、`parse-handler.js`、`unified-parser.js`、`platformRoutes.js`、`platforms.ts`、`share-text.ts`（服务端抽链接，与前端 `utils/share.ts` 行为对齐）、`blockedPlatforms.ts`、`anti-bot.js`、`honeypot.ts`、`analytics.js` + `turso-client.js`。
+- 平台解析：抖音（route 内 + `douyin-extract.js`/`douyinFallback.js`）、`kuaishouCore.js`、bilibili（route 内 + `bilibili-opus.js` 图文、`bilibili-cookie-guard.js` 失效告警）、`instagram.js`、`tiktokDlp.js`、`ytDlpClient.js`（备用封装）、`youtube.js`、`qqmusic.js`/`qqmusic-id.js`/`qqmusic-sign.js`，其余小平台解析内联在各 route。
+- 音乐：`gdmusic.js`、`lx-provider.js`、`lx-host.js`、`music-link.ts`、`netease-meta.js`；`self-search/`（自研直连搜索：`netease.js`/`tencent.js`/`kugou.js`/`kuwo.js`/`migu.js` + `index.js` 统一编排 + `errors.js`，配套单测 `tests/self-search.test.ts`、路由单测 `tests/self-route.test.ts`）。
+- 前端工具：`utils/share.ts`、`utils/videoProxy.ts`、`utils/downloadImages.ts`、`utils/filename.ts`。
 
-## Environment Variables
+## 环境变量
 
-Configure in `.env` for full functionality:
+敏感 Cookie 只进服务端环境变量（平台路由在 Node runtime 读），**不要写入 `wrangler.toml` / 前端可及文件**。完整说明与示例在 `API.md`「限制说明 → 环境变量配置」，此处给速查：
 
-- `DOUYIN_COOKIE`, `DOUYIN_USER_AGENT` — Douyin parsing
-- `BILIBILI_COOKIE` — Bilibili parsing（建议配置：浏览器登录态完整 Cookie，必含 SESSDATA；规避数据中心出口的 -412/-352 风控。含失效自检：连续 5 次风控日志告警「BILIBILI_COOKIE 疑似失效」，成功自动复位，获取步骤见 `API.md`）
-- `XHS_COOKIE` — Xiaohongshu parsing（数据中心/海外出口被风控时强烈建议配置）
-- `WEIBO_COOKIE` — Weibo parsing
-- `IG_COOKIE` — Instagram parsing（Instagram 对匿名访客开启登录墙，公开内容也需服务端配置登录态 Cookie；缺失时解析器返回明确提示）
-- `MUSIC_API_BASE` — 音乐聚合上游基址覆盖（`src/lib/gdmusic.js`，默认公共 GD 音乐台 `https://music-api.gdstudio.xyz/api.php`）。**重要**：公共实例仅对普通家用网络可用；对云厂商/数据中心出口（Vercel 美东 `iad1` 函数即属此类）会触发其 Cloudflare 人机校验，表现为本机 dev 正常、线上 `/api/music` 各 action 全部 502/失败（详见 `API.md` §12 开头）。线上部署若必须请求该公共实例，需自建一个「该环境可直连、无风控」的 gdstudio 契约兼容上游（如 GD 音乐台开源版自托管在无海外拦截的服务器），再把地址配到此环境变量
-- `MUSIC_API_BASES` — 可选：音乐聚合上游**多源链**（逗号/空白分隔的多个同契约基址，按序组成回退链）。每次上游请求按序尝试：主源网络异常 / HTTP 错误 / CF 风控页时自动切下一个基址（业务级结果如 `rejected` / `not-found` 不回退，GD 契约镜像间曲库一致）；总耗时受 8s 上游预算约束并均分到剩余基址。两变量都配置时以 `MUSIC_API_BASES` 为准；都未配置时回落公共默认实例。前端另有浏览器直连兜底（`music-client.ts` `directAfterDown`，用户民用网络不受数据中心出口拦截影响）。**提醒**：接入的基址须为同契约（`types=search/url/pic/lyric` 等参数一致）且对部署出口可达的实例，实测不可达地址只会拖慢失败；可通过线上 `/api/music` 请求日志中的 `all bases down reason=` 判断哪个地址不可用
-- YouTube parsing is pure HTTP (serverless-friendly)，**不依赖 yt-dlp、无必填 API Key**：oEmbed 确认视频存在 + 并发竞速多个 Piped/Invidious 实例取下载直链。成功结果恒带官方嵌入信息（`data.videoId` / `data.embedUrl`，前端 YouTubeVideo 组件渲染官方 iframe 在线播放，不依赖任何解析实例）；解析源全部不可用但元数据源确认视频存在时，降级返回「仅官方嵌入」成功结果（`data.embedOnly=true`，无 url/audioUrl）——该降级结果不写缓存，解析源恢复后重试即自动拿回直链。2026-09 实测：官方登记 Invidious 实例（docs.invidious.io/instances）匿名 API 已全部被拒（403/401/反爬页），Piped 尚存可用社区实例，公共源整体波动大——稳定使用请配置下面两个自托管解析源环境变量。可选：配置 `YOUTUBE_API_KEY` 启用官方 Data API v3 作为**优先元数据源**（仅元数据、无直链），embedOnly 降级时也能凭官方数据补齐富信息卡（见下）。前端国内可达性处理：官方 iframe 播放依赖用户网络直连 YouTube（不可代理）；其余资源均经服务端转发——头像/封面经 `/api/image`（YouTubeVideo 内代理失败自动回退直链），「直链播放」兜底与下载经 `/api/video-proxy`（`googlevideo.com` 与 Piped `pipedproxy` 域已纳入 `utils/videoProxy` 的 `needsVideoProxy` 判定，非防盗链而是网络可达性原因）
-- `YOUTUBE_PIPED_HOSTS` — 逗号分隔的 Piped 解析服务（默认内置若干公共实例）。支持裸域名或完整 `https://...`（可填自托管实例，请求 `<base>/streams/{videoId}`）
-- `YOUTUBE_INVIDIOUS_HOSTS` — 逗号分隔的 Invidious 解析服务（请求 `<base>/api/v1/videos/{videoId}`）
-- `YOUTUBE_SOURCE_TIMEOUT_MS` — YouTube 单源请求超时（默认 6000）；注：yt-dlp 仅剩 TikTok 路由使用（`src/lib/tiktokDlp.js`）；YouTube 失败与 embedOnly 降级结果均不写缓存（共享 24h / 内存 5min），瞬时故障重试即重新解析
-- `YOUTUBE_API_KEY` — 可选：YouTube Data API v3 密钥（Google Cloud 开通）。配置后官方 v3 成为「优先元数据源」（**只补元数据、不提供直链**，下载仍靠 Piped/Invidious 竞速）：标题/简介/频道真实头像/播放/点赞/发布时间/订阅/时长以官方为准，并附频道号 @handle（`authorId`，主页链接升级为 handle 形式）、频道简介（`sign`）、投稿数（`videoCount`）、频道累计播放（`channelViews`），前端仅在拿到值时展示；v3 不可用或超时时自动回退 oEmbed，未配置时行为与此前完全一致。配额默认 1 万单位/天，每次解析约 2 单位（videos.list + channels.list，频道字段全部在现有 snippet,statistics 请求内，不加请求）
-- `YOUTUBE_API_TIMEOUT_MS` — 官方 v3 元数据整体超时（默认 5000，videos+channels 两次请求共享此预算），超时自动放弃并回退原链路；竞速成功路径 v3 失败即回退、不重试（不拖慢首屏），降级（embedOnly）路径 v3 失败自动重试一次（每次独立预算）并记 warn 日志，尽量保住官方作者信息
-- `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` — Turso (libsql) database for parse analytics; when unset, analytics is silently disabled
-- `STATS_API_KEY` — Bearer key protecting `GET /api/stats`; when unset, the stats endpoint returns 403
-- `LIVE_URL_*` (21 variables) — Real share URLs for live tests (see `tests/live/urls.example.env`)
+- 抖音：`DOUYIN_COOKIE`（可选，仅增强；UA 轮询已硬编码，**没有 `DOUYIN_USER_AGENT`**）。
+- 哔哩哔哩：`BILIBILI_COOKIE`（强烈建议，穿透数据中心/海外出口 -412/-352 WAF；含失效自检告警）、`BILIBILI_USER_AGENT`（已写入 wrangler `[vars]`）。
+- 小红书：`XHS_COOKIE`（可选）。微博：自动游客模式，无需 Cookie（`WEIBO_COOKIE` 已废弃）。
+- Instagram：`IG_COOKIE`（强烈建议）、`IG_TIMEOUT_MS`（默认 20000）。
+- QQ音乐 source+id：`QQMUSIC_COOKIE`（可选，vkey 试听接口）。X/Twitter：`TWITTER_FIXER_SERVICES`（可选，覆盖 fixer 集）。
+- YouTube：`YOUTUBE_PIPED_HOSTS`（默认内置 3 个公共 Piped 候选）、`YOUTUBE_INVIDIOUS_HOSTS`（默认**不启用**，需显式配置或自托管）、`YOUTUBE_API_KEY`（Data API v3，仅优先元数据，无直链）、`YOUTUBE_API_TIMEOUT_MS`（默认 5000）、`YOUTUBE_SOURCE_TIMEOUT_MS`（默认 6000）。yt-dlp 已不参与 YouTube。
+- 音乐：`MUSIC_API_BASE` / `MUSIC_API_BASES`（GD 契约上游链；公共实例对数据中心出口会被 CF 人机校验拦，线上需自建可直连实例）、`MUSIC_LX_SCRIPTS`（洛雪脚本，URL / file:// / 本地路径，多个逗号/空格分隔或 JSON 数组）、`MUSIC_LX_SCRIPTS_DIR`（可选，脚本目录，目录内每个 *.js 视为一个脚本）、`MUSIC_LX_SCRIPT_TTL_MS`（默认 6h）。未设置 `MUSIC_LX_SCRIPTS_DIR` 时仓库根目录的 `.lxref/scripts/` 自动加载（开发/Docker“放入即生效”）。自研直连搜索（`/api/music/self`）为代码内直连实现，无需额外环境变量。
+- 统计：`TURSO_DB_URL` + `TURSO_AUTH_TOKEN`（未配置静默禁用）、`STATS_API_KEY`（`/api/stats` Bearer，未配置 403）。
+- 开关：`VIDEO_PARSE_ENABLED`（`"true"` 才放开视频解析入口，wrangler `[vars]` 已配）。
+- 蜜罐：`NEXT_PUBLIC_SITE_URL`（蜜罐页引导 URL 前缀，默认站点）。
+- 测试：`RUN_LIVE_PARSE=1`、`RUN_LIVE_RESOLVE=1`、`LIVE_URL_*`（真机分享链接，模板 `tests/live/urls.example.env`，含可选 `LIVE_URL_BILIBILI_OPUS`）、`LIVE_PARSE_TIMEOUT_MS`（默认 120000）。单测内部还会读写 `VITEST=true`、`MUSIC_LX_SCRIPTS`、`MUSIC_LX_SCRIPT_TTL_MS`。
+- yt-dlp 备用封装：`YTDLP_BIN`、`YTDLP_TIMEOUT_MS`（默认 25000）。
 
-## Conventions
+## 约定
 
-- **Mixed JS/TS**: Core lib files are plain JS (`src/lib/*.js`), API routes are JS, components are TSX, types in `src/types/`
-- **Path alias**: `@/*` maps to `./src/*` (configured in tsconfig + vitest)
-- **npm** is the package manager
-- Test files use `@ts-nocheck` for flexibility
-- API response format: `{ code: 200, msg: "...", data: {...}, platform: "..." }`
+- 语言风格：核心逻辑/API 为 `.js`，页面组件为 `.tsx`，类型集中在 `src/types/`。
+- 路径别名 `@/* → ./src/*`（`tsconfig.json` + `vitest.config.mts`）。
+- API 统一响应 `{ code, msg, data?, platform? }`；成功 `code:200`；字段契约以 `src/types/api.ts`、`API.md`、`normalize-result.ts` 为准。业务态错误尽量带 `failType`（`bot-gated` / `sources-down` / `source-unavailable` / `script-error` 等），前端据此区分提示与降级。
+- 路由一律 `nodejs` runtime（勿引入对 Worker runtime 不兼容的依赖到 route 里）。
+- 平台清单保持单一数据源：识别/`source+id` 能力改 `lib/platforms.ts`；解析路由注册改 `lib/platformRoutes.js`；前端平台元数据/排序/图标改 `src/config/video-platforms.ts`。README/API/CLAUDE 中的平台与接口清单由这些配置推导而来，改代码时同步更新文档。
+- 请求外部平台遵循“最小打扰”：限流、UA、Referer、Cookie 治理都在中间件/解析器头部完成，新平台照抄既有路由的骨架（短链跟随超时、`AbortSignal.timeout`、UA 常量）。
 
-## Deployment
+## 部署
 
-Three targets: Vercel (one-click), Cloudflare Workers (`wrangler.toml`), Docker (GHCR + Docker Hub via GitHub Actions). The Docker CI workflow runs unit tests before building.
+- **Vercel**：导入即用；注意公共 GD 上游对数据中心出口会触发 CF 人机校验，`/api/music` 需 `MUSIC_API_BASE(S)` 指向可直连实例；TikTok（yt-dlp child_process）在 Serverless 不可用。
+- **Cloudflare Workers**（OpenNext）：`npm run build:cf` → `.open-next/`；`wrangler.toml` 已配 `[vars]`/`[assets]`；敏感 Cookie 经 GitHub Actions `wrangler secret put` 注入（`.github/workflows/deploy-cloudflare.yaml`）。
+- **Docker（当前线上正式运行方式）**：多阶段 `Dockerfile`（standalone 产物）内置 yt-dlp + ffmpeg（TikTok 依赖）并以非 root 运行；`.github/workflows/deploy-to-docker.yaml` 手动触发发布。
+- 开发依赖含 `@opennextjs/cloudflare`（`build:cf`）、`vitest`；未配置 prettier/format 脚本，代码风格靠 ESLint（`npm run lint`）约束。改动组件后跑 `npm run lint` 自查。

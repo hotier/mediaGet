@@ -1,0 +1,143 @@
+
+> tiny-wind-3b79@0.1.24 dev
+> next dev --turbopack
+
+ ⚠ Port 3000 is in use by process 25948, using available port 3002 instead.
+   ▲ Next.js 15.5.23 (Turbopack)
+   - Local:        http://localhost:3002
+   - Network:      http://198.18.0.1:3002
+   - Experiments (use with caution):
+     · optimizePackageImports
+
+ ✓ Starting...
+ ✓ Ready in 19.4s
+ ⚠ Webpack is configured while Turbopack is not, which may cause problems.
+ ⚠ See instructions if you need to configure Turbopack:
+  https://nextjs.org/docs/app/api-reference/next-config-js/turbopack
+
+ ○ Compiling /music ...
+ ✓ Compiled /music in 19.5s
+ GET /music 200 in 12928ms
+ GET /music 200 in 22372ms
+ ○ Compiling /api/ip ...
+ ✓ Compiled /api/ip in 1670ms
+ GET /api/ip 200 in 2539ms
+ GET /music 200 in 2425ms
+ GET /api/ip 200 in 3944ms
+ ○ Compiling /music ...
+ ✓ Compiled in 1656ms
+ ✓ Compiled /music in 1582ms
+ ⨯ ReferenceError: Footer is not defined
+    at RootLayout (src\app\layout.tsx:131:12)
+  129 |           {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
+  130 |           <BackToTop />
+> 131 |           <Footer />
+      |            ^
+  132 |         </div>
+  133 |       </body>
+  134 |     </html> {
+  digest: '3877576501'
+}
+ ⨯ ReferenceError: Footer is not defined
+    at RootLayout (src\app\layout.tsx:131:12)
+  129 |           {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
+  130 |           <BackToTop />
+> 131 |           <Footer />
+      |            ^
+  132 |         </div>
+  133 |       </body>
+  134 |     </html> {
+  digest: '3877576501'
+}
+ GET /music 200 in 4261ms
+ GET /music 500 in 3009ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ○ Compiling /music ...
+ ✓ Compiled in 2.3s
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled /music in 1508ms
+ GET /music 200 in 4063ms
+ GET /music 200 in 1678ms
+ ○ Compiling / ...
+ ✓ Compiled / in 2.6s
+ GET / 200 in 3184ms
+ ○ Compiling /music ...
+ ✓ Compiled in 2.3s
+ ✓ Compiled /music in 1901ms
+ ⨯ ReferenceError: BackToTop is not defined
+    at RootLayout (src\app\layout.tsx:129:12)
+  127 |           <main className="flex-1">{children}</main>
+  128 |           {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
+> 129 |           <BackToTop />
+      |            ^
+  130 |           <SiteFooter />
+  131 |         </div>
+  132 |       </body> {
+  digest: '1089369667'
+}
+ ⨯ ReferenceError: BackToTop is not defined
+    at RootLayout (src\app\layout.tsx:129:12)
+  127 |           <main className="flex-1">{children}</main>
+  128 |           {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
+> 129 |           <BackToTop />
+      |            ^
+  130 |           <SiteFooter />
+  131 |         </div>
+  132 |       </body> {
+  digest: '1089369667'
+}
+ GET /music 200 in 6255ms
+ ⨯ ReferenceError: BackToTop is not defined
+    at RootLayout (src\app\layout.tsx:129:12)
+  127 |           <main className="flex-1">{children}</main>
+  128 |           {/* 回到顶部：文档流位于页脚前，悬浮时固定右下角，滚到底自然停在页脚线上方 */}
+> 129 |           <BackToTop />
+      |            ^
+  130 |           <SiteFooter />
+  131 |         </div>
+  132 |       </body> {
+  digest: '1089369667'
+}
+ ✓ Compiled in 3.7s
+ GET /music 500 in 8809ms
+ ○ Compiling /music ...
+ ✓ Compiled /music in 1152ms
+ GET /music 200 in 2434ms
+ GET /music 200 in 878ms
+ ✓ Compiled / in 220ms
+ GET / 200 in 1320ms
+ GET /api/ip 200 in 1484ms
+ ○ Compiling / ...
+ ✓ Compiled in 2.7s
+ ✓ Compiled / in 2.3s
+ GET / 200 in 4145ms
+ GET / 200 in 3217ms
+ GET /api/ip 200 in 1562ms
+ ✓ Compiled in 8.1s
+ GET / 200 in 2637ms
+ ✓ Compiled in 4.1s
+ ✓ Compiled in 215ms
+ ✓ Compiled in 294ms
+ ✓ Compiled in 1109ms
+ ✓ Compiled in 151ms
+ ✓ Compiled / in 204ms
+ GET / 200 in 1485ms
+ GET / 200 in 1195ms
+ ✓ Compiled in 647ms
+ ✓ Compiled in 1301ms
+ GET / 200 in 2998ms
+ ✓ Compiled in 5s
+ ○ Compiling / ...
+ ✓ Compiled / in 1732ms
+ GET / 200 in 10022ms
+ GET / 200 in 9072ms
+ GET /api/ip 200 in 3131ms
+ ✓ Compiled in 494ms
+ ✓ Compiled in 1359ms
+ ✓ Compiled in 2.6s
+ ✓ Compiled in 7s
+ ✓ Compiled in 197ms
+ ✓ Compiled in 249ms
+ ✓ Compiled in 288ms
+ ✓ Compiled in 1271ms

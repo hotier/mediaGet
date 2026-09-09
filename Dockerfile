@@ -65,6 +65,10 @@ USER node
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
+# 本地洛雪音源脚本（仓库 .lxref/scripts/*.js）：打包进镜像后 lx-provider 按默认
+# 目录自动加载（进程 cwd=/app），构建时把想启用的 lx 源脚本放进该目录即可；无脚本时
+# 目录仅含 .gitkeep，不影响构建。
+COPY --from=builder --chown=node:node /app/.lxref/scripts ./.lxref/scripts
 
 EXPOSE 3000
 
