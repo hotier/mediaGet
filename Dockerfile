@@ -65,10 +65,11 @@ USER node
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
-# 本地洛雪音源脚本（仓库 .lxref/scripts/*.js）：打包进镜像后 lx-provider 按默认
-# 目录自动加载（进程 cwd=/app），构建时把想启用的 lx 源脚本放进该目录即可；无脚本时
-# 目录仅含 .gitkeep，不影响构建。
-COPY --from=builder --chown=node:node /app/.lxref/scripts ./.lxref/scripts
+# 洛雪(lx-music)自定义音源脚本：仓库默认不随附脚本。如需镜像内置启用，自行把脚本放入
+# .lxref/scripts/ 并在本文件添加一行 COPY（如：
+#   COPY --from=builder --chown=node:node /app/.lxref/scripts ./.lxref/scripts
+# ），lx-provider 会在进程 cwd=/app 下按默认目录自动加载；也可运行时用
+# MUSIC_LX_SCRIPTS_DIR 挂载目录、或经 MUSIC_LX_SCRIPTS 直接配置脚本。
 
 EXPOSE 3000
 

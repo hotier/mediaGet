@@ -38,17 +38,18 @@
 │                       下载与封面决策收敛（trackDownloadSpec/coverBinUrl）；UI 不得读 isDirectUsed 或手拼 URL
 └ 服务端 routes
    /api/music        （provider=gd）    gdmusic.js  组装 GD 契约 types=url/search/pic/lyric，多基址 8s 预算回退
-   /api/music/self   （自研直连，search）lib/self-search/（index/errors + netease/tencent/kugou/kuwo/migu 各一模块）
+   /api/music/self   （自研直连，search/url）lib/self-search/（index/errors + netease/tencent/kugou/kuwo/migu 各一模块；kugou 官方试听直链在 kugou.js）
    /api/music/lx     （provider=lx）    lx-provider.js + lx-host.js（node:vm 沙箱执行社区脚本，脚本视为不可信）
-   /api/music/resolve                  music-link.ts 纯函数识别 → 官方详情通道（netease-meta / qqmusic / kuwo-meta）
+   /api/music/resolve                  music-link.ts 纯函数识别 → 官方详情通道（netease-meta / qqmusic / kuwo-meta / kugou getSongInfo）
+   /api/music/caps   平台能力矩阵下发  lib/music-platform-flags.js（后端真源，读 env）→ 前端 lib/music-caps.ts 拉取过滤
 ```
 
-> 自研直连搜索（`/api/music/self`）的定位与价值：`tencent`/`kugou`/`migu` 是 GD 未开放搜索的**独立搜索源 chips**；`netease`/`kuwo` 双通道：搜索以本通道为主，自研失败才回退 GD 搜索引擎（会话置位后同源翻页直接走 GD）。搜索结果归一为 GD 搜索同契约 SearchItem（`line.kind=self`）；封面不强求——搜索响应能内嵌的图床 URL 写入 `picUrlDirect` 直接展示，**不做二次换取**。`tencent`/`netease`/`kuwo` 的 id 与 GD 直链通道所需 id 一致可复用；`kugou`/`migu` 无内置直链引擎（`sourceEngineKindFor → self`），默认只能搜索展示——若部署侧配置 lx 音源脚本并经 sources 目录 `urlFallbacks` 映射（默认 wy/tx/kw/kg/mg，可 `MUSIC_LX_URL_FALLBACKS` 增改），点播/切音质由 `requestPlayDirect` 自动改由音源脚本按同曲 id/hash 换链（见 §1.3 / §2 C8 修订）。
+> 自研直连搜索（`/api/music/self`）的定位与价值：`tencent`/`kugou`/`migu` 是 GD 未开放搜索的**独立搜索源 chips**；`netease`/`kuwo` 双通道：搜索以本通道为主，自研失败才回退 GD 搜索引擎（会话置位后同源翻页直接走 GD）。搜索结果归一为 GD 搜索同契约 SearchItem（`line.kind=self`）；封面不强求——搜索响应能内嵌的图床 URL 写入 `picUrlDirect` 直接展示，**不做二次换取**。`tencent`/`netease`/`kuwo` 的 id 与 GD 直链通道所需 id 一致可复用；`kugou` 已内置官方免费试听直链（`action=url` → `getSongInfo`，免费档 128k mp3，VIP/付费曲取链失败返回 `failType=vip-only`，见 `src/lib/self-search/kugou.js`）；`migu` 仍无内置直链引擎（`sourceEngineKindFor → self`，`SELF_ONLY_ENGINE_KEYS`），默认只能搜索展示——若部署侧配置 lx 音源脚本并经 sources 目录 `urlFallbacks` 映射（默认 wy/tx/kw/kg/mg，可 `MUSIC_LX_URL_FALLBACKS` 增改），点播/切音质由 `requestPlayDirect` 自动改由音源脚本按同曲 id/hash 换链（见 §1.3 / §2 C8 修订）。
 
 关键不变量（代码事实）：
 
 - **UI 无状态请求、无直链拼装**：直链/封面/下载 URL 一律由 `music-client` 出口；服务端失败按 `kind` 分类，`proxy` 通道不可用才允许浏览器直连 GD 公共源，且一次成功会话内即记忆（`directUsed`）。
-- **播放调度在前端**：`use-player-engine` 的 `playTrack(item, index)` 拿到 `SearchItem` 后走 `requestPlayDirect(source, item, br)`（music-client 播放统一取链入口：GD 主通道失败 / self 无内置直链时，按已加载音源脚本的 `urlFallbacks` 映射自动改走「lx 音源同曲换链」，见 §1.3 步骤 2），就绪后经 `canplay` 起播；切音质 `switchQuality` 同样走 `requestPlayDirect`，热切换“旧档不打断、新源 seek 续播”；自然 `ended` 后 `playNext`（队尾且有 `hasMore` 时先 `fetchMorePage` 再播新页第一首）。
+- **播放调度在前端**：`use-player-engine` 的 `playTrack(item, index)` 拿到 `SearchItem` 后走 `requestPlayDirect(source, item, br)`（music-client 播放统一取链入口：GD 主通道失败 / kugou 官方直链失败 / migu 无内置直链（`SELF_ONLY_ENGINE_KEYS`）时，按已加载音源脚本的 `urlFallbacks` 映射自动改走「lx 音源同曲换链」，见 §1.3 步骤 2），就绪后经 `canplay` 起播；切音质 `switchQuality` 同样走 `requestPlayDirect`，热切换“旧档不打断、新源 seek 续播”；自然 `ended` 后 `playNext`（队尾且有 `hasMore` 时先 `fetchMorePage` 再播新页第一首）。
 - **后端是薄动作 API，不维护播放会话**：`/api/music` 只做「按 source+id+br 取直链 / 按词搜索 / pic / lyric」。增强不得改成后端持会话的长连接式设计。
 
 ### 1.2 数据模型与契约（对齐 music-client / API.md）
@@ -64,7 +65,7 @@
 ### 1.3 播放链路（现状时序）
 
 1. 列表点击/链接解析成功 → `playTrack(item)`：置位 `picked/fetching`，`unlockAutoplay()`（用户手势内静音试播解锁）。
-2. `requestPlayDirect(source, item, br)`（music-client 播放统一取链入口）：GD 源 → `/api/music`（代理 `kind=down` 才直连），**取直链失败（VIP/试听受限、404 等）时自动试「lx 音源同曲换链」兜底**；self 源（kugou/migu）无内置直链 → 已配置 `urlFallbacks` 兜底映射（且脚本注册对应 source）则直接走音源换链，否则抛 `NO_ENGINE_MSG`（见 §8「仅搜索展示」分支）；lx 源 → `/api/music/lx?action=url`。音源兜底失败静默，沿用主通道错误信息。
+2. `requestPlayDirect(source, item, br)`（music-client 播放统一取链入口）：GD 源 → `/api/music`（代理 `kind=down` 才直连）；kugou（self 源，已内置直链）→ `/api/music/self?action=url`（官方 `getSongInfo`，免费档 128k mp3，VIP/付费曲取链失败）；migu（self 源，`SELF_ONLY_ENGINE_KEYS` 无内置直链）→ 已配置 `urlFallbacks` 兜底映射（且脚本注册对应 source）则直接走音源换链，否则抛 `NO_ENGINE_MSG`（见 §8「仅 migu」分支）；lx 源 → `/api/music/lx?action=url`。GD / kugou / migu 主通道失败时自动试「lx 音源同曲换链」兜底（lx 源自身除外）；音源兜底失败静默，沿用主通道错误信息。
 3. 成功 `setDirect(data)` → `<audio src>` 资源 `canplay` 后 `play()`（被自动播放策略拦截时静音起播再还原用户音量设置）。
 4. 失败仅 `setPlayError(msg)` 展示，**当前无自动换源**；队列续播只由 `ended` 驱动。
 5. 封面走 `requestPic`（picId→URL，代理可用时 `coverBinUrl` 同源取色）；下载由 `trackDownloadSpec` 决策 `bin`（同源字节代理、文件名带音质标签）或 `external`。
@@ -73,6 +74,14 @@
 
 ## 2. 现状约束清单（增强设计的地基）
 
+> ⚠️ **2026-09 变更：平台「搜索引擎」与「播放引擎」改为部署可配开关（双层能力矩阵）**——tencent（QQ音乐）代码与注册**完整保留**，仅**默认停用**；开关关闭 = UI 不展示 + 后端拒绝动作，恢复/关闭无需再改代码：
+>
+> - **真源与下发**：后端唯一真源 `src/lib/music-platform-flags.js`（读 env、动态生效）；前端默认矩阵与后端同值源（`src/lib/music-caps.ts`），挂载时拉 `/api/music/caps` 覆盖为“生效矩阵”（未拉到前按默认过滤，防首帧闪烁）。
+> - **开关模型**：面向用户的 6 平台（netease/tencent/kugou/kuwo/migu/joox）各含二维开关 `search`（搜索引擎）/ `play`（播放引擎 = 取直链通道）。默认值：`MUSIC_PLATFORM_SEARCH` 仅停 tencent、其余开启；`MUSIC_PLATFORM_PLAY` 仅开 netease/kuwo/kugou/joox、停 tencent/migu——kugou 为内置官方免费试听直链（免费档 128k mp3，VIP/付费曲取链失败 `vip-only`），migu 无内置直链（`SELF_ONLY_ENGINE_KEYS`），可经已配置 lx 脚本 `urlFallbacks` 兜底。
+> - **关闭表现**：`search` 关 → 前端不展示该源 chip / 聚合候选（`MusicExplorer` 过滤 `SELF_SEARCH_SOURCES` + `buildSearchChips`），后端 `action=search` 与 `/api/music/self` 拒绝并 400 `source-unavailable`（文案含“可配置 MUSIC_PLATFORM_SEARCH 开启”）；`play` 关 → `/api/music?action=url` 拒绝取链、`/api/music/resolve` 识别成功但返回 `engine-missing`（文案含 `MUSIC_PLATFORM_PLAY`）。
+> - **语义边界**：仅“面向用户的 6 平台”受开关约束；lx 脚本扩展源、GD-only 源不在全集内，恒视为启用（避免误伤）；lx `urlFallbacks` 兜底是独立“播放通道”，不随平台 `play` 开关收敛。歌词/封面/pic 等数据通道不受开关影响，resolve 的歌曲识别与官方详情元数据同理不受影响。
+> - 下文凡提及 tencent 为“独立搜索源 chips / 可搜可播集合”之处，均指**开关放开后的启用态**；默认部署下等价于停用态（后端 `enabledPlatformList` / 前端 `getPlatformCaps` 为唯一口径）。
+
 以下限制来自已落地上游契约，**任何增强方案都不得假设这些约束不存在**：
 
 | # | 约束 | 影响 |
@@ -80,11 +89,11 @@
 | C1 | GD `action=search` 只开放 `netease / kuwo / joox`，其余 source（含 `tencent`）返回 400 | 「自动跨源搜同名」只能在**可搜索源集合**（GD 三源 + lx `searchSources`）内发生 |
 | C2 | GD search 响应字段无时长，`SearchItem` 未透传 duration | 原方案“时长 20 分、差 >15s 淘汰”在**解析失败降级段无法计算**，见 §6 两段式 |
 | C3 | lx 源取决于部署侧 `MUSIC_LX_SCRIPTS`，无浏览器直连兜底、错误原样透传 | lx 候选失败只能提示，不能静默跳过 |
-| C4 | `resolve` 官方详情仅 netease/tencent/kuwo ready，kugou `engine-missing` | 官方高置信候选覆盖面有限 |
+| C4 | `resolve` 识别与官方详情 ready：netease/tencent/kuwo/kugou（kugou 走官方 `getSongInfo` 详情并直接返回可播曲目）。（2026-09 起 tencent 播放引擎默认停用，未放开 `MUSIC_PLATFORM_PLAY` 时 QQ 链接识别成功亦回 `engine-missing`，放开后恢复 `playable`） | 官方高置信候选覆盖面有限，QQ 候选是否可播随开关收敛 |
 | C5 | 直链均带时效，`requestDirect` 每次现取 | 任何“缓存可用歌曲”都只是缓存 **候选 ID** |
 | C6 | 部署形态三选一：Docker standalone（当前线上，进程内存单实例）/ Vercel / CF Workers(OpenNext) | 缓存载体需按部署选型，见 §7 |
 | C7 | 播放态失败（403/404/410/CORS/超时）发生在 `audio` 元素层，`use-player-engine` transport 当前未上送 `onError` | 需要补 transport 事件，失败才能进入换源闭环 |
-| C8 | 自研直连搜索通道（`/api/music/self`）可搜 netease/tencent/kugou/kuwo/migu：tencent/kugou/migu 为独立搜索源 chips（GD 无其搜索），netease/kuwo 双通道：本通道为主，自研失败才回退 GD 搜索引擎。但 kugou/migu **无内置直链引擎**（`sourceEngineKindFor → self`），默认只能搜索展示（封面/歌词抛明确 biz 提示）；配置 lx 音源兜底映射（sources 目录 `urlFallbacks`，默认 wy/tx/kw/kg/mg）后点播/切音质改由音源脚本同曲换链 | 换源候选只收录**可播放**的源（tencent/netease/kuwo/joox + lx 目录），kugou/migu 即便搜到同名也不进自动候选；引擎对 self 源仅在「无 urlFallbacks 命中」时跳过自动换源闭环（确定性失败避免空转），有兜底映射时先试音源换链、失败后再进候选遍历 |
+| C8 | 自研直连搜索通道（`/api/music/self`）可搜 netease/tencent/kugou/kuwo/migu：tencent/kugou/migu 为独立搜索源 chips（GD 无其搜索），netease/kuwo 双通道：本通道为主，自研失败才回退 GD 搜索引擎。kugou 已内置官方免费试听直链（`/api/music/self?action=url` → `getSongInfo`，免费档 128k mp3，VIP/付费曲取链失败 `failType=vip-only`）；migu 仍**无内置直链引擎**（`SELF_ONLY_ENGINE_KEYS`，`sourceEngineKindFor → self`），默认只能搜索展示（封面/歌词等数据通道抛明确 biz 提示）；配置 lx 音源兜底映射（sources 目录 `urlFallbacks`，默认 wy/tx/kw/kg/mg）后点播/切音质改由音源脚本同曲换链 | 换源候选只收录**可播放**的源（netease/kuwo/tencent/joox/kugou + lx 目录，随 search+play 开关收敛），migu 即便搜到同名也不进自动候选（kugou 默认即候选）；引擎对 migu（`SELF_ONLY_ENGINE_KEYS`）仅在「无 urlFallbacks 命中」时跳过自动换源闭环（确定性失败避免空转），有兜底映射时先试音源换链、失败后再进候选遍历；kugou 直链失败属业务性（VIP/下架/网络），正常进入候选遍历 |
 
 ---
 
@@ -144,11 +153,11 @@ CURRENT(source,id,br)
 | 来源 | 说明 | 置信基准 | 成本 |
 |---|---|---|---|
 | A 队列内近似 | 当前 keyword 搜索结果列表里经清洗标题+歌手比对出的同歌不同版本条目 | 文本可证，多数可直接 auto | 0（已持有） |
-| B 可搜索源现搜 | 在「可搜可播源（netease/kuwo/tencent/joox：netease·kuwo 自研为主 GD 兜底、tencent 自研、joox 仅 GD；kugou/migu 无直链引擎仅展示、剔除）+ lx searchSources」内，以清洗后歌名+主歌手逐源 search 第 1 页（count=20，分派与列表搜索一致：self-first / GD-fallback），打分过滤后并入 | §6 打分，≥75 才 auto | 每源 1 次 search，必须串行或 ≤2 并发 |
+| B 可搜索源现搜 | 在「可搜可播源（netease/kuwo/tencent/kugou/joox：netease·kuwo 自研为主 GD 兜底、tencent/kugou 自研、joox 仅 GD；kugou 已内置官方直链默认即候选、migu 无直链引擎仅展示并剔除）+ lx searchSources」内，以清洗后歌名+主歌手逐源 search 第 1 页（count=20，分派与列表搜索一致：self-first / GD-fallback），打分过滤后并入 | §6 打分，≥75 才 auto | 每源 1 次 search，必须串行或 ≤2 并发 |
 | C 会话内已 resolve 曲目 | 本会话粘贴链接解析出的官方曲目（netease/tencent/kuwo，`metadata=full`） | 官方详情高置信 | 0（会话内） |
 | D 历史播放成功缓存 | 本曲“真实播放成功”过的候选（见 §7 层①） | 曾真实可播 | 0 |
 
-约束映射（对照 §2/C8）：netease/kuwo/tencent/joox 均可搜可播（netease·kuwo 走 self-first / GD-fallback），kugou/migu 借自研通道可搜但 **无直链引擎**，B 只收录可播放源（netease/kuwo/tencent/joox）；lx 扩展或 resolve 过的官方曲目仍进 B/C。
+约束映射（对照 §2/C8）：netease/kuwo/tencent/kugou/joox 均可搜可播（netease·kuwo 走 self-first / GD-fallback，kugou 走内置官方直链），migu 借自研通道可搜但 **无直链引擎**（`SELF_ONLY_ENGINE_KEYS`），B 只收录可播放源（netease/kuwo/tencent/kugou/joox）；lx 扩展或 resolve 过的官方曲目仍进 B/C。
 
 规则：
 
@@ -223,8 +232,8 @@ CURRENT(source,id,br)
 
 - 搜歌点列表 → `playTrack`；失败给 `playError`；封面临时占位取色；自然播完自动续播下一页。
 - 自研直连搜索源 chips（tencent/kugou/migu）与双通道源 netease/kuwo 的自研主通道：搜索列表带 `line.kind=self` 徽标（「自研直搜」）；封面不强求——搜索结果内嵌 `picUrlDirect` 直接展示、无则占位，**不上传二次封面换取**。
-- kugou/migu「仅搜索展示」：点播 / 封面 / 歌词直接抛明确 biz 提示（`NO_ENGINE_MSG` 等，渲染进 `playError`），引擎对 self 源**跳过自动换源闭环**（确定性失败，同队列候选也必同为该源，空转无意义）。
-- **聚合搜索**：SearchPanel chips 行首「聚合搜索」伪 chip（`aggActive`，不占 `source`）。`music-client.searchAcrossSources`（平台级限流闸 ≤3 路并发，即使多次触发叠加同一时刻也不超 3 路；逐源失败隔离）拉全部可用源第 1 页 → `src/lib/music-match.ts`（纯函数，文本清洗/关键词相关度打分/`isSameSong` 同曲判定）跨源去重（同分取「可播副本」优先：GD/lx > self 仅展示）→ 相关度降序（打分只取决于关键词与歌曲内容，排序不掺平台/引擎顺序）截断 80 条混合展示。规则与播放失败自动换源共用（引擎内 `cleanMusicText`/`musicKey` 已收敛到该模块）；聚合列表无翻页、不落播放快照，部分源失败在列表尾 `pageErr` 提示、全部失败给空态原因。
+- migu「仅搜索展示」（`SELF_ONLY_ENGINE_KEYS`）：点播 / 封面 / 歌词直接抛明确 biz 提示（`NO_ENGINE_MSG` 等，渲染进 `playError`），引擎对 migu 在「无 urlFallbacks 命中」时**跳过自动换源闭环**（确定性失败，同队列候选也必同为该源，空转无意义）；kugou 已内置官方免费试听直链，点播直接可播（免费档 128k；VIP/付费曲失败 `vip-only`），封面/歌词等数据通道仍抛 biz 提示。
+- **聚合搜索**：SearchPanel chips 行首「聚合搜索」伪 chip（`aggActive`，不占 `source`）。`music-client.searchAcrossSources`（平台级限流闸 ≤3 路并发，即使多次触发叠加同一时刻也不超 3 路；逐源失败隔离）拉全部可用源第 1 页 → `src/lib/music-match.ts`（纯函数，文本清洗/关键词相关度打分/`isSameSong` 同曲判定）跨源去重（同分取「可播副本」优先：GD > lx/kugou > migu 仅展示）→ 相关度降序（打分只取决于关键词与歌曲内容，排序不掺平台/引擎顺序）截断 80 条混合展示。规则与播放失败自动换源共用（引擎内 `cleanMusicText`/`musicKey` 已收敛到该模块）；聚合列表无翻页、不落播放快照，部分源失败在列表尾 `pageErr` 提示、全部失败给空态原因。
 
 增强后（仅增加分支，不改变既有状态）：
 
@@ -256,7 +265,7 @@ CURRENT(source,id,br)
   - ✅ 已落地（引擎层，`use-player-engine.ts`，不触碰 UI）：`audioProps.onError` 上送（`play` 阶段失败）；`resolve`/`play` 双失败闭环，token 化有界（`MAX_AUTO_ALT_ATTEMPTS`）自动换源队列内近似高置信候选；`failStage` / `alternatives` / `autoTrying` 快照暴露。
   - ✅ 已落地（UI 层）：`MusicExplorer.tsx` 消费 `failStage` / `alternatives` / `autoTrying`——`autoTrying` 期间播放条上方轻量进行态 pill（“播放失败，正在自动尝试同曲其他版本…”）；失败收尾且队列内仍有未尝试同曲候选时自动弹出 `AltSelectDialog` 人工选版面板（逐行展示 来源徽标 + 歌名 + 歌手 + 专辑，整行点击即 `playTrack` 重走闭环；Esc / 遮罩 / X 关闭，关闭记忆 `altDismissed` 随换歌复位）。引擎侧配套：候选快照仅保留本轮尚未自动尝试的版本、任一候选播放就绪即清空快照（防陈旧候选在后续音质档失败时误弹）；自动尝试的“取消”= 手动切歌（token 失效），pill 内未做独立取消按钮。
 - **P2｜跨源现搜**（已落地：来源 B 自动兜底；未落地：层③④负缓存、§6 两段式时长校验）：
-  - 来源 B 自动兜底：队列内已无自动候选可试时，一次失败至多跑 **1 轮现搜**——拿原曲在「可搜可播源（netease/kuwo/joox + tencent + lx searchSources，剔除失败源自身与无直链的 kugou/migu）」现搜第 1 页，由 `music-match.ts` 的 `rankSongMatchCandidates` 打分收敛：≥75 且专辑一致 → 自动接续尝试（A 耗尽后才动用）；60-74 或专辑冲突 → 人工候选。
+  - 来源 B 自动兜底：队列内已无自动候选可试时，一次失败至多跑 **1 轮现搜**——拿原曲在「可搜可播源（netease/kuwo/joox + tencent + kugou + lx searchSources，剔除失败源自身与无直链的 migu）」现搜第 1 页，由 `music-match.ts` 的 `rankSongMatchCandidates` 打分收敛：≥75 且专辑一致 → 自动接续尝试（A 耗尽后才动用）；60-74 或专辑冲突 → 人工候选。
   - 预算/并发：单轮直链尝试预算由 2 上调到 ≤4（来源 A 队列候选 + 来源 B 现搜候选共用 `MAX_AUTO_ALT_ATTEMPTS`）；跨源现搜复用聚合闸（≤3 并发）、切歌/重置即中止（轮次 token + AbortController），现搜网络异常静默降级不阻塞闭环。
   - UI：pill 动态文案（`altNote`，跨源现搜阶段提示“正在跨音源现搜…”）；`AltSelectDialog` 跨源条目带“现搜”徽标与置信注角；面板可点“现搜”回条目（不在队列时走 index=-1 直接播放）。
   - 未落地：层③④ 负缓存/黑名单（重复失败不再跨源重搜、专辑名歌手级停用）；层① 歌手热歌缓存；§6 时长维度校验；候选来源 C（解析产物/会话内 resolve）。

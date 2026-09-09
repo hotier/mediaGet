@@ -1245,6 +1245,55 @@
     radial-gradient(120% 80% at 20% 50%, color-mix(in srgb, var(--mp-acc, #335eea) 18%, transparent), transparent 55%);
 }
 
+/* —— AMLL Core BackgroundRender 封面动态背景 ——
+   宿主铺在背景层（z -1，位于静态封面模糊层之上、页面内容之下），
+   由 amll-background.tsx 注入 AMLL PixiRenderer 画布。画布内把封面
+   排成多份并旋转/位移，叠加多级模糊与色彩滤镜形成流动动态背景；
+   封面在库内渲染完成前宿主透明（0），完成后 .is-on 淡入到
+   --amll-bg-opacity 目标不透明度——与底下调色渐变 / 深色主题底色
+   合成，保证现有文字/玻璃对比策略不受影响。画布自身 pointer-events
+   由库置 none，不参与任何点击判定。 */
+.amll-bg-host {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.amll-bg-host.is-on {
+  opacity: var(--amll-bg-opacity, 0.62);
+}
+.amll-bg-host canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* 可读性纱幕：整块盖在动态画布之上、页面内容之下。动态画布上的封面旋转
+   模糊会让画面明暗随时漂移，歌词文字 / 按钮图标直接叠在上面对比度不稳定；
+   纱幕按调色板分支（LyricPage 注入的 mplp-dyn-night/day）把画面亮度收敛
+   到文字所需的区间——浅字配深纱幕压暗、深字配浅纱幕提亮。 */
+.amll-bg-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.mp-lyricpage.mplp-dyn-night .amll-bg-scrim {
+  background: rgba(6, 8, 12, 0.45);
+}
+.mp-lyricpage.mplp-dyn-day .amll-bg-scrim {
+  background: rgba(248, 250, 253, 0.34);
+}
+/* 用户偏好减弱动态效果：不展示动态画布（组件内也不会创建 WebGL），
+   保持静态 CSS 背景观感 */
+@media (prefers-reduced-motion: reduce) {
+  .amll-bg-host {
+    display: none;
+  }
+}
+
 /* ============================================================
    动态取色配色：has-palette 时（已从封面采样成功）以封面主色渐变
    不透明铺底，并把整页歌词内的文字/玻璃/进度/强调变量切到一组
@@ -1652,10 +1701,80 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 24px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 24px), transparent 100%);
 }
 .mplp-right .mp-lyric-empty { min-height: 0; padding-bottom: 6vh; }
+
+/* —— AMLL（Apple Music 风格）歌词渲染 ——
+   歌词行由 AMLL 的 DomLyricPlayer 绘制：行级模糊 / 放大过渡自带，
+   不再需要 .mplp-right 上下渐隐遮罩；此处只负责容器与调色板变量。 */
+.mp-amll-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.mp-amll-host .mp-lyric-empty { padding-bottom: 6vh; }
+/* AMLL 文字色 / 字号跟随整页调色板（未取到色时兜底页面文字色）。
+   min(3vw, 5vh) 让桌面字号随屏幕宽度/高度双向受限，大字不溢出歌词列 */
+.mp-lyricpage .amll-lyric-player {
+  color: var(--mplp-fg, var(--text-primary));
+  --amll-lp-font-size: clamp(21px, min(3vw, 5vh), 34px);
+}
+/* 窄屏整页歌词：字号降到 ~5vw 与桌面视觉密度对齐——此前 7vw 大字会让
+   桌面端一行的歌词在移动端折成两行 */
+@media (max-width: 768px) {
+  .mp-lyricpage .amll-lyric-player {
+    --amll-lp-font-size: clamp(17px, 5vw, 23px);
+    /* 库默认 line-height 1.2：同一条歌词折行后两行几乎贴死，与行间 padding
+       间距不一致；提到 1.35 让折行行内也有呼吸感 */
+    line-height: 1.35;
+  }
+}
+/* 动态背景生效时：AMLL 播放器默认 mix-blend-mode: plus-lighter（加色混合），
+   只适合白字压深底；一旦下层是流动的封面画面或「亮底深字」分支，歌词会与
+   背景互相叠加而发虚/隐形。改回普通混合后，歌词严格按调色板的
+   --mplp-fg 上色，配合上方的可读性纱幕即可稳定对比。 */
+.mp-lyricpage.mplp-dynbg .amll-lyric-player {
+  mix-blend-mode: normal;
+}
+/* —— AMLL 字形加重 —— 主歌词正文加粗；翻译/注音小字保持常规字重（词库翻译行
+   默认 0.3 透明度偏暗，这里提到 0.62 保证能读，又不抢主歌词） */
+.mp-lyricpage .amll-lyric-player .FmKaba_lyricLine {
+  font-weight: 700;
+}
+.mp-lyricpage .amll-lyric-player .FmKaba_lyricSubLine {
+  font-weight: 400;
+  opacity: 0.62;
+}
+/* —— AMLL 行排版微调 ——
+   1) 行距：AMLL 依每行容器实测高度逐行排布，把行容器上下内边距从
+      库默认 .4em 放宽即可均匀拉开行距、降低密度（不要用 margin，
+      行内有负 margin 抵消命中区，改 margin 会破坏行距算法）；
+   2) 居中对齐：整行文字在歌词栏内水平居中，翻译/注音随父级继承；
+      双人唱左右分栏行保留库的右对齐，不做居中。 */
+.mp-lyricpage .amll-lyric-player .FmKaba_lyricLineWrapper {
+  padding-top: 1em;
+  padding-bottom: 1em;
+}
+/* 窄屏行距：此前 2.4em×2 + min-height:5em 行距过大（一行歌词折成两行时更
+   挤压无间距、行间却巨宽）；收敛到 0.9em 与折行行高协调 */
+@media (max-width: 768px) {
+  .mp-lyricpage .amll-lyric-player .FmKaba_lyricLineWrapper {
+    padding-top: 0.9em;
+    padding-bottom: 0.9em;
+  }
+  /* 主行与翻译/注音子行的间距：主行「padding:1em / margin:-1em」会把子行
+     拉到紧贴主行文字，这里只在子行有内容时补回间隔；空子行(:empty)不加
+     margin，避免每行下方多出空档。 */
+  .mp-lyricpage .amll-lyric-player .FmKaba_lyricSubLine:not(:empty) {
+    margin-top: 0.55em;
+  }
+}
+.mp-lyricpage .amll-lyric-player
+  .FmKaba_lyricLine:not(.FmKaba_lyricDuetLine) {
+  text-align: center;
+}
 
 /* 整页歌词内隐藏垂直滚动条（桌面右侧歌词区与移动端整页上下滚动均保留滚动能力） */
 .mp-lyricpage .mp-lyric-body,

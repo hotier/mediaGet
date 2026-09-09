@@ -162,7 +162,8 @@ describe("GET /api/music（通用音乐源获取）", () => {
 
     const res = await GET(
       new Request(
-        "http://127.0.0.1/api/music?source=tencent&id=777777&br=320&fmt=text",
+        // tencent 播放引擎默认停用会被平台开关拦截；改用默认开启的 kuwo 验证 fmt=text 契约
+        "http://127.0.0.1/api/music?source=kuwo&id=777777&br=320&fmt=text",
         { headers: { "x-forwarded-for": "203.0.113.42" } }
       )
     );

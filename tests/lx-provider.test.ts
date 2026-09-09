@@ -225,11 +225,22 @@ describe("lx 脚本注册层（注入 fetcher + env 配置）", () => {
   });
 
   it("未配置任何脚本 → 目录为空且无 lx source", async () => {
-    const cat = await getLxCatalog();
-    expect(cat.scripts).toHaveLength(0);
-    expect(cat.sources).toHaveLength(0);
-    expect(cat.searchSources).toHaveLength(0);
-    expect(isLxSourceKey("qdy")).toBe(false);
+    // 隔离：未设 MUSIC_LX_SCRIPTS_DIR 时默认目录 .lxref/scripts/（若存在脚本）会被自动加载，
+    // 这里指向一个空临时目录，使“未配置”的断言与本地/CI 环境解耦。
+    const dir = await mkdtemp(join(tmpdir(), "lx-empty-"));
+    process.env.MUSIC_LX_SCRIPTS_DIR = dir;
+    resetLxScriptRegistryForTest();
+    try {
+      const cat = await getLxCatalog();
+      expect(cat.scripts).toHaveLength(0);
+      expect(cat.sources).toHaveLength(0);
+      expect(cat.searchSources).toHaveLength(0);
+      expect(isLxSourceKey("qdy")).toBe(false);
+    } finally {
+      delete process.env.MUSIC_LX_SCRIPTS_DIR;
+      resetLxScriptRegistryForTest();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("对未注册的 source 发起动作 → 抛 LxProviderError(source-not-found)", async () => {
@@ -309,8 +320,19 @@ describe("音源兜底映射（urlFallbacks）", () => {
   });
 
   it("未配置脚本时 urlFallbacks 为空", async () => {
-    const cat = await getLxCatalog();
-    expect(cat.urlFallbacks).toEqual([]);
+    // 隔离同上：默认目录 .lxref/scripts/ 若被放入脚本会注册 wy/tx 等 source，
+    // 不指向空目录则 urlFallbacks 会带出默认映射项，破坏“空脚本”语义。
+    const dir = await mkdtemp(join(tmpdir(), "lx-empty-"));
+    process.env.MUSIC_LX_SCRIPTS_DIR = dir;
+    resetLxScriptRegistryForTest();
+    try {
+      const cat = await getLxCatalog();
+      expect(cat.urlFallbacks).toEqual([]);
+    } finally {
+      delete process.env.MUSIC_LX_SCRIPTS_DIR;
+      resetLxScriptRegistryForTest();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

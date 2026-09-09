@@ -7,6 +7,7 @@ import {
   hasSelfSearchNextPage,
   selfSearch,
 } from "@/lib/self-search";
+import { isPlatformSearchEnabled } from "@/lib/music-platform-flags";
 import { buildNeteaseSearchForm, parseNeteaseSearch, searchNetease } from "@/lib/self-search/netease";
 import {
   buildTencentSearchBody,
@@ -30,11 +31,12 @@ function jsonResponse(data, status = 200) {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe("self-search 统一入口", () => {
-  it("支持 5 个源，key 沿用 GD 通道命名", () => {
+  it("完整注册 5 源（tencent 实现常驻，启用与否由平台开关 MUSIC_PLATFORM_SEARCH 决定）", () => {
     expect(SELF_SEARCH_SOURCE_LIST).toEqual([
       "netease",
       "tencent",
@@ -43,6 +45,10 @@ describe("self-search 统一入口", () => {
       "migu",
     ]);
     expect(SELF_SEARCH_SOURCE_LABELS.kugou).toBe("酷狗音乐");
+    expect(SELF_SEARCH_SOURCE_LABELS.tencent).toBe("QQ音乐");
+    // 默认开关：tencent 搜索引擎停用 → 注册表在、启用集无
+    expect(isPlatformSearchEnabled("tencent")).toBe(false);
+    expect(isPlatformSearchEnabled("netease")).toBe(true);
   });
 
   it("未知 source → SelfSearchError(source-unavailable)", async () => {
@@ -50,6 +56,19 @@ describe("self-search 统一入口", () => {
       name: "SelfSearchError",
       code: "source-unavailable",
     });
+  });
+
+  it("tencent（默认开关关闭）→ SelfSearchError(source-unavailable)", async () => {
+    await expect(selfSearch("tencent", "晴天", 1, 20)).rejects.toMatchObject({
+      name: "SelfSearchError",
+      code: "source-unavailable",
+    });
+  });
+
+  it("MUSIC_PLATFORM_SEARCH 放开 tencent 后其搜索引擎启用（env 可配）", () => {
+    vi.stubEnv("MUSIC_PLATFORM_SEARCH", '{"tencent":true}');
+    expect(isPlatformSearchEnabled("tencent")).toBe(true);
+    vi.unstubAllGlobals();
   });
 
   it("hasSelfSearchNextPage：total 精确算 + 无 total 按回满整页兜底", () => {

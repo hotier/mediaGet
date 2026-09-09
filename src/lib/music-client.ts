@@ -13,13 +13,17 @@
  * 2. 自研直连搜索（服务器直连各音源搜索接口，不经 GD）：GET /api/music/self?action=search
  *    （对应 src/lib/self-search/* + src/app/api/music/self/route.js）。
  *    分派语义：
- *    - 独立搜索源 chips（tencent / kugou / migu）：仅自研（GD 未开放其搜索）；
+ *    - 独立搜索源 chips：tencent / kugou / migu 仅自研（GD 未开放其搜索）；
  *    - 双通道源（netease / kuwo）：**自研直连搜索为主**，GD 搜索引擎仅作兜底——自研通道
  *      失败时回退 GD（同源代理 → 浏览器直连），会话内该源后续直接走 GD，不再每次空转自研。
- *    tencent / kuwo / netease 的自研搜索结果可复用既有 GD 直链 / 歌词 / 封面通道；
- *    kugou / migu 自研搜索无内置直链；若配置了对应 lx 音源脚本（sources 目录
- *    urlFallbacks 映射，见 lx-provider.js MUSIC_LX_URL_FALLBACKS），点播/切音质时
- *    会自动改由音源脚本按同曲 id/hash/songmid 换直链（见 requestPlayDirect）。
+ *    平台「搜索引擎 / 播放引擎」为可配置开关（MUSIC_PLATFORM_SEARCH / MUSIC_PLATFORM_PLAY，
+ *    见 music-platform-flags.js）：tencent 默认关（可播直链无稳定来源）——chips 是否展示、
+ *    跨源现搜候选等由 music-caps 生效矩阵过滤；直链 / 歌词 / 封面通道能力不随本开关移除。
+ *    kuwo / netease / tencent 的自研搜索结果可复用既有 GD 直链 / 歌词 / 封面通道；
+ *    kugou 内置官方试听直链（/api/music/self?action=url，免费档 128k mp3，VIP/付费曲
+ *    返回 failType=vip-only）；migu 自研搜索无内置直链——若配置了对应 lx 音源脚本
+ *    （sources 目录 urlFallbacks 映射，见 lx-provider.js MUSIC_LX_URL_FALLBACKS），
+ *    点播/切音质时会自动改由音源脚本按同曲 id/hash/songmid 换直链（见 requestPlayDirect）。
  * 3. 洛雪(lx-music)扩展音源：同源 /api/music/lx（脚本仅在 Node 侧沙箱执行，无直连兜底）。
  *
  * 注意：浏览器直连没有服务端缓存 / 限流兜底，且仅对民用出口可用；数据契约解析与本文件上游
@@ -31,6 +35,10 @@ import {
   SELF_SEARCH_SOURCES,
   type SearchSourceKey,
 } from "@/components/music/types";
+import {
+  isPlatformPlayOn,
+  isPlatformSearchOn,
+} from "@/lib/music-caps";
 
 /** 搜索结果默认每页条数（对齐服务端 gdmusic.js 的 GD_SEARCH_COUNT_DEFAULT=20） */
 export const PAGE_SIZE = 20;
@@ -163,10 +171,12 @@ export interface LxCatalogData {
  *  注意渠道细节：netease/kuwo 的搜索现以自研为主（GD 引擎兜底），joox 搜索仅 GD。 */
 const GD_BUILTIN_SOURCE_KEYS = SEARCH_SOURCES.map((s) => s.key);
 
-/** 内置自研直连搜索源 key（独立搜索源 chips：tencent/kugou/migu，GD 未开放其搜索） */
+/** 内置自研直连搜索源 key 全集（tencent/kugou/migu；平台开关关闭时的过滤在 UI chips 层，
+ *  见 music-caps.ts——全集保留、展示按 MUSIC_PLATFORM_SEARCH 生效矩阵收敛） */
 export const SELF_SEARCH_CHIP_KEYS = SELF_SEARCH_SOURCES.map((s) => s.key);
 
-/** 自研直连搜索白名单（netease/kuwo/tencent/kugou/migu；对齐 src/lib/self-search/index.js） */
+/** 自研直连搜索白名单全集（netease/kuwo/tencent/kugou/migu；与 src/lib/self-search/index.js
+ *  注册表一致；实际可搜 = 全集 ∩ 平台搜索引擎开关） */
 export const SELF_SEARCH_KEYS = new Set([
   ...GD_BUILTIN_SOURCE_KEYS.filter((k) => k !== "joox"),
   ...SELF_SEARCH_CHIP_KEYS,
@@ -175,8 +185,14 @@ export const SELF_SEARCH_KEYS = new Set([
 /** 双通道搜索源（netease/kuwo）：自研直连搜索为主、GD 搜索引擎作兜底（自研通道失败才走 GD） */
 const GD_FALLBACK_SEARCH_KEYS = new Set(["netease", "kuwo"]);
 
-/** 仅能自研搜索展示、无 GD/lx 直链引擎的源（kugou/migu） */
-export const SELF_ONLY_ENGINE_KEYS = new Set(["kugou", "migu"]);
+/** 自研直连源中仍未接内置取直链的子集（仅 migu；kugou 已内置官方试听直链）。
+ *  这些源没有本服务直链路径，只能依赖已配置的 lx 音源脚本兜底（urlFallbacks）。 */
+export const SELF_ONLY_ENGINE_KEYS = new Set(["migu"]);
+
+/** 引擎通道 = 自研直连（/api/music/self，无 GD/lx/浏览器直连概念）的源：
+ *  kugou 用官方试听直链，migu 无内置直链（见 SELF_ONLY_ENGINE_KEYS）。
+ *  自研双通道源 netease/kuwo 与 tencent（历史曲目走 GD）的引擎通道仍是 gd，不在此列。 */
+export const SELF_CHANNEL_SOURCE_KEYS = new Set(["kugou", "migu"]);
 
 /** 无论 lx 脚本是否声明同名源都算内置（GD 或自研直连）的 key，扩展源目录需剔除它们 */
 const BUILTIN_SOURCE_KEYS = [...GD_BUILTIN_SOURCE_KEYS, ...SELF_SEARCH_CHIP_KEYS];
@@ -247,9 +263,11 @@ export function lxSearchableSources(): LxSearchSource[] {
  * 「可搜又可播」的音源 key 集合（跨源现搜兜底来源 B 用）。
  *
  * 规则（对齐 musicEngine.md §5 来源 B）：
- * - 内置 GD 源：netease / kuwo / joox（均具备直链引擎）；
- * - 自研搜索源里带直链的 tencent（kugou / migu 仅能搜索展示，无直链，剔除）；
- * - lx 目录已加载的可搜索扩展源（脚本源本身即负责搜索 + 直链）；
+ * - 内置平台（GD 源 netease/kuwo/joox + 自研源 tencent/kugou/migu）须同时满足
+ *   平台搜索引擎开关 search 与播放引擎开关 play（music-caps，默认 tencent 全关、
+ *   migu play 关），且剔除 SELF_ONLY_ENGINE_KEYS——migu 无内置直链，恒不作为跨源候选
+ *   （配置 lx 脚本后由下方的可搜索扩展源承担）；kugou 已内置官方直链，默认即候选；
+ * - lx 目录已加载的可搜索扩展源（脚本源本身即负责搜索 + 直链，不受平台开关约束）；
  * - 传 excludeSource 时把失败源自身剔除（避免在刚失败的同一 source 上重复现搜）。
  */
 export function crossSearchPlayableSourceKeys(
@@ -260,9 +278,11 @@ export function crossSearchPlayableSourceKeys(
     if (!k || k === excludeSource || keys.includes(k)) return;
     keys.push(k);
   };
-  for (const s of SEARCH_SOURCES) push(s.key); // netease / kuwo / joox
-  for (const s of SELF_SEARCH_SOURCES) {
-    if (!SELF_ONLY_ENGINE_KEYS.has(s.key)) push(s.key); // tencent
+  for (const s of [...SEARCH_SOURCES, ...SELF_SEARCH_SOURCES]) {
+    if (!isPlatformSearchOn(s.key)) continue; // 引擎（平台开关）未开
+    if (!isPlatformPlayOn(s.key)) continue; // 播放引擎未开
+    if (SELF_ONLY_ENGINE_KEYS.has(s.key)) continue; // migu 无内置直链，不收录
+    push(s.key);
   }
   for (const s of lxSearchableSources()) push(s.key);
   return keys;
@@ -635,13 +655,15 @@ export async function requestResolve(
 
 // —— 源通道引擎：搜索引擎 / 内容提供通道的抽象面 ——
 // 三条服务通道：gd = GD 聚合上游（同源代理优先 + 浏览器直连降级 + bin=1 字节能力），
-// lx = 洛雪生态脚本扩展源（仅同源代理，无 bin），self = 自研直连搜索源（仅搜索展示，
-// 无 GD/lx 直链引擎，kugou/migu）。UI 层判断“某个 source 属于哪种引擎、能否 bin 下载 /
-// 封面取色 / 直连降级”都必须走这里的注册函数，而不是在各组件里手拼 /api/music URL 或读
-// isDirectUsed。未来接入新的源引擎：在此注册 kind 判定与能力即可。
+// lx = 洛雪生态脚本扩展源（仅同源代理，无 bin），self = 自研直连源（搜索 + kugou 官方
+// 试听直链均经 /api/music/self，无 bin；migu 无内置直链，见 SELF_ONLY_ENGINE_KEYS）。
+// UI 层判断“某个 source 属于哪种引擎、能否 bin 下载 / 封面取色 / 直连降级”都必须走这里
+// 的注册函数，而不是在各组件里手拼 /api/music URL 或读 isDirectUsed。未来接入新的源引擎：
+// 在此注册 kind 判定与能力即可。
 //
-// 注意：self 引擎只覆盖「无直链通道」的自研搜索源（kugou/migu）；tencent 的自研搜索产物
-// 播放/歌词/封面仍复用 GD 直链通道，因此 tencent/netease/kuwo 的引擎通道仍是 gd。
+// 注意：self 引擎仅覆盖自研直连源（kugou/migu）；tencent 的搜索引擎默认停用（部署侧
+// MUSIC_PLATFORM_SEARCH 可开启，见 music-platform-flags.js），链接解析/历史缓存携带的
+// tencent 曲目播放/歌词/封面仍复用 GD 直链通道，因此 tencent/netease/kuwo 的引擎通道仍是 gd。
 
 /** 源通道引擎种类（注册新引擎：在 sourceEngineKindFor 内新增判定分支） */
 export type SourceEngineKind = "gd" | "lx" | "self";
@@ -656,8 +678,8 @@ export interface SourceEngineCaps {
 /** source key → 所属引擎通道（未识别一律按 GD 内置契约源处理，保持向后兼容） */
 export function sourceEngineKindFor(source: string): SourceEngineKind {
   if (isLxSourceKey(source)) return "lx";
-  // 自研搜索新源中无 GD/lx 直链引擎的源（kugou/migu）：只能搜索展示
-  if (SELF_ONLY_ENGINE_KEYS.has(source)) return "self";
+  // 引擎通道 = 自研直连源（kugou/migu）：走 /api/music/self，无 bin
+  if (SELF_CHANNEL_SOURCE_KEYS.has(source)) return "self";
   return "gd";
 }
 
@@ -667,9 +689,9 @@ export function sourceEngineCapsFor(source: string): SourceEngineCaps {
   return { kind, gdBytes: kind === "gd" };
 }
 
-/** 该源无 GD/lx 直链引擎时播放失败给用户的文案（自研搜索新源 kugou/migu） */
+/** 该源无内置直链引擎时播放失败给用户的文案（migu；SELF_ONLY_ENGINE_KEYS） */
 export const NO_ENGINE_MSG =
-  "该音源自研搜索结果仅供识别，暂未接入试听直链引擎；可切到网易云/QQ/酷我等音源搜索同一首歌";
+  "该音源暂未接入试听直链引擎，且未配置可用的兜底音源脚本；可切到网易云/QQ音乐/酷狗/酷我等音源搜索同一首歌";
 
 /**
  * 下载入口的通道内决策结果：
@@ -733,8 +755,9 @@ function stampSearchLine(data: SearchData): SearchData {
 
 /**
  * 自研直连搜索（同源 /api/music/self）：不经 GD 上游，服务端直连各音源搜索接口。
- * 支持 source：netease/tencent/kugou/kuwo/migu（GD 通道命名）。返回数据自带 line(kind=self)，
- * 翻页上限 / hasMore 由服务端计算，这里不做浏览器直连兜底（服务端已直连音源）。
+ * 支持 source：netease/tencent/kugou/kuwo/migu（GD 通道命名；某平台是否启用受
+ * MUSIC_PLATFORM_SEARCH 开关约束，默认仅 tencent 停用）。返回数据自带
+ * line(kind=self)，翻页上限 / hasMore 由服务端计算，这里不做浏览器直连兜底（服务端已直连音源）。
  */
 async function requestSelfSearchPage(
   src: string,
@@ -790,7 +813,7 @@ async function requestGdSearchPage(
  *
  * 分派顺序（同一 source 只会命中一种）：
  * - lx 扩展源 → /api/music/lx（脚本只能在 Node 侧跑，无浏览器直连兜底）；
- * - 自研直连搜索独立源 chips（tencent/kugou/migu）→ /api/music/self（仅自研）；
+ * - 自研直连搜索独立源 chips（kugou/migu）→ /api/music/self（仅自研）；
  * - 双通道源 netease/kuwo → 先 /api/music/self（**自研为主**）；自研通道失败时回退 GD 搜索
  *   （同源代理 → 浏览器直连，见 requestGdSearchPage），并把该源标为「本会话 GD 兜底」
  *   （gdFallbackSearchSources），后续请求（含翻页）直接走 GD，不再每次空转一遍自研；
@@ -818,7 +841,7 @@ export async function requestSearchPage(
     }
     return pageData;
   }
-  // 自研直连搜索独立源 chips（tencent/kugou/migu）：仅走自研通道
+  // 自研直连搜索独立源 chips（kugou/migu）：仅走自研通道
   if (SELF_SEARCH_CHIP_KEYS.includes(src)) {
     return requestSelfSearchPage(src, kw, targetPage, signal);
   }
@@ -946,6 +969,20 @@ export async function searchAcrossSources(
   return Promise.all(keys.map(runOne));
 }
 
+/** 自研直连源取直链：/api/music/self?action=url（kugou 官方试听直链；无浏览器直连兜底） */
+async function requestSelfPlayDirect(
+  source: string,
+  id: string,
+  br: string,
+  signal: AbortSignal
+): Promise<DirectData> {
+  const qs = new URLSearchParams({ action: "url", source, id, br });
+  const payload = await proxyGet(qs, signal, "/api/music/self");
+  const data = payload.data as DirectData | undefined;
+  if (!data?.url) throw new MusicError("biz", NOT_FOUND_MSG);
+  return data;
+}
+
 /** 取指定 source+id 在 br 档位下的试听直链 */
 export async function requestDirect(
   source: string,
@@ -953,9 +990,13 @@ export async function requestDirect(
   br: string,
   signal: AbortSignal
 ): Promise<DirectData> {
-  // self 源（kugou/migu）：无 GD/lx 直链引擎，明确提示（避免打到 GD 后误报“未找到链接”）
+  // self 源：migu（SELF_ONLY）无内置直链明确提示；kugou 有官方直链走自研端点
+  //（避免 migu 打到 GD 后误报“未找到链接”）
   if (sourceEngineKindFor(source) === "self") {
-    throw new MusicError("biz", NO_ENGINE_MSG);
+    if (SELF_ONLY_ENGINE_KEYS.has(source)) {
+      throw new MusicError("biz", NO_ENGINE_MSG);
+    }
+    return requestSelfPlayDirect(source, id, br, signal);
   }
   // lx 扩展源：改发 /api/music/lx?action=url（br 由服务端映射为 128k/320k/flac…）
   if (sourceEngineKindFor(source) === "lx") {
@@ -982,7 +1023,8 @@ export async function requestDirect(
  * 播放取直链入口（点歌 / 切音质）。
  *
  * - GD 引擎源：原直链优先；失败（VIP 受限 / 404 等）时自动尝试 lx 音源脚本同曲换链；
- * - self 源（kugou / migu，无内置直链）：直接尝试 lx 音源兜底，未配置则保持 NO_ENGINE 提示；
+ * - self 源（kugou / migu）：kugou 走内置官方直链（失败再试 lx 兜底）；migu（无内置直链）
+ *   直接尝试 lx 音源兜底，未配置则保持 NO_ENGINE 提示；
  * - lx 源（脚本可搜源 chip）：等同原 requestDirect 直发，不叠加兜底。
  */
 export async function requestPlayDirect(
@@ -1007,7 +1049,8 @@ export async function requestPlayDirect(
     }
     return null;
   };
-  if (kind === "self") {
+  if (kind === "self" && SELF_ONLY_ENGINE_KEYS.has(source)) {
+    // migu 无内置直链：仅试 lx 音源兜底
     const data = await tryLxFallback();
     if (data) return data;
     throw new MusicError("biz", NO_ENGINE_MSG);
@@ -1082,6 +1125,38 @@ export async function requestLyric(
     () => directLyric(source, lyricId, signal),
     signal
   );
+}
+
+/** AMLL 词库可按平台 ID 精确匹配逐字歌词的源（源名沿用 GD 通道命名） */
+const AMLL_ID_SOURCES = new Set(["netease", "tencent"]);
+
+/** 该源是否能用平台 ID 精确查词库（其余源只能模糊搜，暂不接入） */
+export function sourceSupportsAmllLyric(source: string): boolean {
+  return AMLL_ID_SOURCES.has(source);
+}
+
+/**
+ * 从 AMLL 词库（/api/music/amll）拉 TTML 逐字歌词原文。
+ * 属于「锦上添花」通道：未收录 / 上游异常一律返回 null，不抛错打扰主歌词流。
+ */
+export async function requestAmllLyric(
+  source: string,
+  id: string,
+  signal: AbortSignal
+): Promise<string | null> {
+  if (!sourceSupportsAmllLyric(source) || !id) return null;
+  try {
+    const qs = new URLSearchParams({ source, id });
+    const res = await fetch(`/api/music/amll?${qs.toString()}`, { signal });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as
+      | { code?: number; data?: { lyric?: unknown } }
+      | null;
+    const lyric = payload?.data?.lyric;
+    return typeof lyric === "string" && lyric.trim() ? lyric : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 音质档位详情 */

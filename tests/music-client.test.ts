@@ -65,12 +65,12 @@ describe("crossSearchPlayableSourceKeys（跨源现搜来源 B 的候选音源�
     resetLxCatalogCache();
   });
 
-  it("未加载 lx 目录时 = 内置 GD 三源 + 可直链自研 tencent；kugou/migu 永不收录", () => {
+  it("未加载 lx 目录时 = 内置 GD 三源 + kugou（官方直链默认收录）；tencent/migu 不收", () => {
     expect(crossSearchPlayableSourceKeys()).toEqual([
       "netease",
       "kuwo",
       "joox",
-      "tencent",
+      "kugou",
     ]);
   });
 
@@ -78,7 +78,7 @@ describe("crossSearchPlayableSourceKeys（跨源现搜来源 B 的候选音源�
     expect(crossSearchPlayableSourceKeys("netease")).toEqual([
       "kuwo",
       "joox",
-      "tencent",
+      "kugou",
     ]);
   });
 
@@ -99,11 +99,10 @@ describe("crossSearchPlayableSourceKeys（跨源现搜来源 B 的候选音源�
 
     const keys = crossSearchPlayableSourceKeys();
     expect(keys).toContain("qdy"); // 新增的 lx 扩展源
-    expect(keys.indexOf("qdy")).toBeGreaterThanOrEqual(4); // 追加在末尾
+    expect(keys.indexOf("qdy")).toBeGreaterThanOrEqual(3); // 追加在末尾
     // 目录里声明与内置重名的源不产生第二份：netease/kuwo 只出现一次
     expect(keys.filter((k) => k === "netease")).toHaveLength(1);
     expect(keys.filter((k) => k === "kuwo")).toHaveLength(1);
-    expect(keys).not.toContain("kugou");
-    expect(keys).not.toContain("migu");
+    expect(keys).not.toContain("migu"); // 无内置直链的自研源不进跨源候选
   });
 });

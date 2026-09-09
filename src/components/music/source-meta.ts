@@ -55,9 +55,10 @@ export function buildSearchChips(
 }
 
 /**
- * 「链接解析」产物平台的展示元信息（source 键按 GD 直链通道命名）。tencent / kugou 现在
- * 也会以自研直连搜索源 chip 的形式出现（sourceMetaFor 优先命中 chip），这里作为 chips
- * 尚未就绪等场景下的兜底文案/配色；未收录平台退回原始 source 键。
+ * 「链接解析」产物平台的展示元信息（source 键按 GD 直链通道命名）。kugou / migu 亦以内置
+ * 自研直连搜索源 chip 出现（sourceMetaFor 优先命中 chip）；tencent 搜索引擎默认停用（部署侧
+ * MUSIC_PLATFORM_SEARCH 可开启），但链接解析 / 历史缓存仍可能携带 tencent 产物，故保留兜底
+ * 文案/配色；未收录平台退回原始 source 键。
  */
 export const RESOLVE_EXTRA_META: Record<string, { label: string; color: string }> = {
   tencent: { label: "QQ音乐", color: "#31c27c" },

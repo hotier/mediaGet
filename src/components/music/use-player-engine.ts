@@ -32,7 +32,7 @@ import {
   hasLxUrlFallbackFor,
   requestPlayDirect,
   searchAcrossSources,
-  sourceEngineKindFor,
+  SELF_ONLY_ENGINE_KEYS,
   type DirectData,
   type SearchItem,
 } from "@/lib/music-client";
@@ -181,19 +181,23 @@ export function usePlayerEngine(options: UsePlayerEngineOptions) {
   const [playError, setPlayError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  /** 音量（0~1）：默认 50%；优先从本地缓存恢复上次调整值，无缓存才用默认 */
-  const [volume, setVolume] = useState(() => {
+  /** 音量（0~1）：默认 50%，本地缓存恢复放到挂载 effect（见下）。
+   *  ⚠️ 不能在 useState 初始化里读 localStorage：SSR 首帧没有 localStorage 会落到默认 0.5（50%），
+   *  而客户端水合首次渲染会读到缓存（如 0.35）→ 两端首帧不一致触发 hydration mismatch
+   *  （react.dev/link/hydration-mismatch）。改为 effect 在挂载后恢复，水合首帧恒为 50%。 */
+  const [volume, setVolume] = useState(0.5);
+  /** 挂载后从本地缓存恢复上次音量（无缓存 / 隐私模式等不可用时保持默认 50%） */
+  useEffect(() => {
     try {
       const raw = localStorage.getItem("mp-player-volume");
       if (raw !== null) {
         const n = Number(raw);
-        if (Number.isFinite(n) && n > 0 && n <= 1) return n;
+        if (Number.isFinite(n) && n > 0 && n <= 1) setVolume(n);
       }
     } catch {
-      // SSR 首屏 / 隐私模式等 localStorage 不可用时忽略，落到默认 50%
+      // localStorage 不可用（隐私模式等）时忽略，保持默认
     }
-    return 0.5;
-  });
+  }, []);
   const [muted, setMuted] = useState(false);
   const [loop, setLoop] = useState(false);
   /** 拖动进度条期间暂停 timeupdate 同步（避免拖拽被回跳打断） */
@@ -436,10 +440,12 @@ export function usePlayerEngine(options: UsePlayerEngineOptions) {
     setAltNote("");
     const started = await attemptPlay(item, index);
     if (started) return;
-    // self 引擎源（kugou/migu）没有内置直链：除非已配置对应 lx 音源兜底（hasLxUrlFallbackFor），
-    // 否则直链失败是确定性的，且队列内同歌候选必然同为该源，自动换源只会空转徒劳，直接展示引擎提示
+    // 仅 migu（SELF_ONLY_ENGINE_KEYS，无内置直链引擎）的直链失败是确定性的：除非已配置对应
+    // lx 音源兜底（hasLxUrlFallbackFor），否则队列内同歌候选必然同为该源，自动换源只会空转
+    // 徒劳，直接展示引擎提示。kugou 已内置官方试听直链，失败属业务性（VIP/下架/网络），
+    // 应正常进入下方跨源自动换源闭环（同曲其它可播音源兜底）。
     if (
-      sourceEngineKindFor(item.source || source) === "self" &&
+      SELF_ONLY_ENGINE_KEYS.has(item.source || source) &&
       !hasLxUrlFallbackFor(item.source || source)
     )
       return;

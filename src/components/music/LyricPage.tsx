@@ -6,13 +6,29 @@ import { cn } from "@/lib/utils";
 import { formatTime } from "@/components/music/types";
 import type { CoverPalette } from "@/lib/cover-palette";
 import { MarqueeText } from "./marquee";
-import LyricScroller from "./lyric-scroller";
+import AmllLyricView from "./AmllLyricView";
+import AmllBackground from "./AmllBackground";
+import { EMPTY_LRC_LINES } from "./lyric-amll";
 import type { LyricLine } from "./lyric-utils";
+import type { AmllRichResult } from "./ttml-amll";
 import type { DirectData, SearchItem } from "@/lib/music-client";
 import IconButton from "./icon-btn";
 
 /** 整页歌词的调色板 CSS 变量（限定 mplp-* 前缀，防止污染页面） */
 type MpCssVars = CSSProperties & Record<`--mplp-${string}`, string>;
+
+/**
+ * 当前文字是浅色（浅字深底）还是深色（深字浅底）——决定动态背景
+ * 上「可读性纱幕」压暗还是提亮：浅字配深色纱幕，深字配浅色纱幕，
+ * 使任意明暗的流动封面画面都收敛到当前配色所需的对比区间。
+ * 无调色板时页面回退为「深底白字」，按浅字处理。
+ */
+function paletteFgIsLight(palette: CoverPalette | null): boolean {
+  if (!palette) return true;
+  const m = /^rgb\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(palette.fg);
+  if (!m) return true;
+  return 0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3] > 140;
+}
 
 export interface LyricPageProps {
   open: boolean;
@@ -31,13 +47,14 @@ export interface LyricPageProps {
   muted: boolean;
   loop: boolean;
   npViewCover: boolean;
-  activeLyricIndex: number;
   coverUrl: string | null;
   coverFailed: boolean;
   lyricLines: LyricLine[] | null;
   lyricsLoading: boolean;
   lyricError: string | null;
   lyricRaw: string | null;
+  /** AMLL 词库逐字行：命中时整页歌词改用真逐字渲染（含翻译），否则 LRC 估算 */
+  amllRich?: AmllRichResult | null;
   accentColor: string;
   palette: CoverPalette | null;
   isMobile: boolean;
@@ -77,13 +94,13 @@ export default function LyricPage({
   muted,
   loop,
   npViewCover,
-  activeLyricIndex,
   coverUrl,
   coverFailed,
   lyricLines,
   lyricsLoading,
   lyricError,
   lyricRaw,
+  amllRich = null,
   accentColor,
   palette,
   isMobile,
@@ -102,6 +119,9 @@ export default function LyricPage({
   onCoverError,
 }: LyricPageProps) {
   if (!open || !picked) return null;
+  // 动态背景是否生效：决定是否挂载 AMLL 画布、叠加纱幕并切换歌词普通混合
+  const dynOn = Boolean(coverUrl) && !coverFailed;
+  const dynScheme = paletteFgIsLight(palette) ? "mplp-dyn-night" : "mplp-dyn-day";
   const disabledPrev = !list || currentIndex == null || currentIndex <= 0;
   const disabledNext =
     !list ||
@@ -176,7 +196,9 @@ export default function LyricPage({
         palette && "has-palette",
         closing && "is-closing",
         !playing && "is-vinyl-paused",
-        npViewCover ? "np-view-cover" : "np-view-lyric"
+        npViewCover ? "np-view-cover" : "np-view-lyric",
+        dynOn && "mplp-dynbg",
+        dynOn && dynScheme
       )}
       role="dialog"
       aria-modal="true"
@@ -193,6 +215,16 @@ export default function LyricPage({
           backgroundImage: coverUrl && !coverFailed ? `url(${coverUrl})` : "none",
         }}
       />
+      {/* AMLL 封面动态背景：封面可用时用 BackgroundRender 把封面做成
+          旋转 + 多级模糊的流动画布。首帧/加载中保持透明，由下方
+          mplp-bg 或调色渐变兜底；换歌只走 setAlbum 内部淡入淡出。 */}
+      {coverUrl && !coverFailed && (
+        <AmllBackground
+          coverUrl={coverUrl}
+          fps={isMobile ? 18 : 30}
+          renderScale={isMobile ? 0.35 : 0.5}
+        />
+      )}
       <div className="mplp-accent" />
 
       <div className="mplp-head">
@@ -332,16 +364,19 @@ export default function LyricPage({
           </div>
         </div>
 
-        {/* 歌词列：移动端行点击不跳进度，与封面同属“进度条以上非按钮区”，点击即切回唱片视图；
-            key 随视图变化：从唱片切回歌词时重挂载，让当前句立即滚入视口 */}
+        {/* 歌词列：AMLL（Apple Music 风格）渲染；移动端行点击不跳进度，与封面
+            同属「进度条以上非按钮区」，点击即切回唱片视图；
+            key 随视图变化：从唱片切回歌词时重挂载，让 AMLL 随新容器重建当前句对齐 */}
         <div className="mplp-right" key={npViewCover ? "np-cover" : "np-lyric"}>
-          <LyricScroller
-            lines={lyricLines ?? []}
+          <AmllLyricView
+            lines={lyricLines ?? EMPTY_LRC_LINES}
+            amllRich={amllRich}
             loading={lyricsLoading}
             error={lyricError}
             hasRaw={Boolean(lyricRaw)}
-            activeIndex={activeLyricIndex}
-            large
+            currentTime={currentTime}
+            playing={playing}
+            duration={duration}
             onSeek={isMobile ? undefined : seek}
           />
         </div>

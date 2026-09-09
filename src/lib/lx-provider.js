@@ -11,8 +11,8 @@
  *     也支持 JSON 数组 [{ "id": "qdy", "url": "https://..." }]；本地文件建议用 JSON 数组，
  *     以便路径含空格也不受影响）；
  *   - 环境变量 MUSIC_LX_SCRIPTS_DIR 指向一个目录，目录内每个 *.js 视为一个音源脚本；
- *   - 未设置 MUSIC_LX_SCRIPTS_DIR 时，若仓库根目录存在 .lxref/scripts/ 目录，
- *     则自动加载其中的全部 *.js（开发本机 / Docker 放入即生效）。
+ *   - 未设置 MUSIC_LX_SCRIPTS_DIR 时，若进程 cwd 下存在 .lxref/scripts/ 目录，
+ *     则自动加载其中的全部 *.js（本地开发“放入即生效”的约定目录，仓库不随附脚本）。
  * 源脚本只跑在 nodejs runtime（本机 / Vercel / Docker），Cloudflare Workers 上不可用。
  *
  * 动作编排：
@@ -243,8 +243,8 @@ export function resolveUrlFallbacks() {
 }
 
 /**
- * 默认本地脚本目录（相对进程 cwd）。本地开发在仓库根目录建 .lxref/scripts/ 放入脚本，
- * Docker 部署时把该目录 COPY 进镜像同路径即可，无需再配环境变量。
+ * 默认本地脚本目录（相对进程 cwd）。仓库默认不随附脚本；本地开发建 .lxref/scripts/
+ * 放入脚本即自动加载。Docker 镜像需要时自行内置该目录，或运行时用 MUSIC_LX_SCRIPTS_DIR 挂载。
  */
 const DEFAULT_LOCAL_SCRIPTS_DIR = ".lxref/scripts";
 
@@ -352,7 +352,7 @@ async function readLocalTextFile(ref) {
  */
 async function readDirScriptConfig() {
   const explicitDir = String(process.env[CONFIG_DIR_ENV] || "").trim();
-  // 默认目录（.lxref/scripts）只是“开发/Docker 放入即生效”的约定，不存在时静默跳过；
+  // 默认目录（.lxref/scripts）只是本地“放入即生效”的约定（仓库不随附脚本），不存在时静默跳过；
   // 显式配置 MUSIC_LX_SCRIPTS_DIR 后目录不可用则视为错误（避免配置失效被悄悄吞掉）
   const dir = explicitDir || DEFAULT_LOCAL_SCRIPTS_DIR;
   let fsMod;

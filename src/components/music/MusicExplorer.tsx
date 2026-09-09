@@ -10,16 +10,25 @@ import {
 import {
   coverBinUrl,
   fetchLxCatalog,
+  requestAmllLyric,
   requestLyric,
   requestPic,
   requestResolve,
   requestSearchPage,
   searchAcrossSources,
   sourceEngineKindFor,
+  sourceSupportsAmllLyric,
+  SELF_ONLY_ENGINE_KEYS,
   type LxSearchSource,
   type SearchItem,
 } from "@/lib/music-client";
 import { aggregateAndRankSearch } from "@/lib/music-match";
+import {
+  getPlatformCaps,
+  isPlatformSearchOn,
+  refreshPlatformCaps,
+  type MusicPlatformFlags,
+} from "@/lib/music-caps";
 import {
   setMusicView,
   useMusicView,
@@ -43,6 +52,7 @@ import {
   parseLrc,
   type LyricLine,
 } from "./lyric-utils";
+import { parseTtmlAmll, type AmllRichResult } from "./ttml-amll";
 import PlayerBar from "./PlayerBar";
 import LyricPage from "./LyricPage";
 import TrackInfoDialog from "./TrackInfoDialog";
@@ -59,7 +69,9 @@ import { usePlayerEngine } from "./use-player-engine";
  *  v 为结构版本：无版本号的旧记录（历史版本会把被动状态也写入缓存）视为无效，忽略并回默认聚合。 */
 const SEARCH_CHANNEL_KEY = "mp-search-channel";
 const SEARCH_CHANNEL_VERSION = 2;
-/** 挂载初期即可用（不依赖 lx 目录）的源 key，用于校验缓存的 source 是否仍可恢复 */
+/** 挂载初期即可用（不依赖 lx 目录）的内置源 key 全集（静态注册表）；
+ *  缓存的 source 能否恢复还须过平台引擎开关（isPlatformSearchOn，见 readSearchChannelPref）——
+ *  全集含默认停用的 tencent，但恢复绝不落到「引擎已关」的平台。 */
 const BUILTIN_SOURCE_KEYS = new Set(
   [...SEARCH_SOURCES, ...SELF_SEARCH_SOURCES].map((s) => s.key)
 );
@@ -74,7 +86,9 @@ function readSearchChannelPref(): SearchChannelPref | null {
     const d = JSON.parse(raw) as Partial<SearchChannelPref> & { v?: number };
     if (d.v !== SEARCH_CHANNEL_VERSION || typeof d.agg !== "boolean") return null;
     const source =
-      d.source && BUILTIN_SOURCE_KEYS.has(d.source)
+      d.source &&
+      BUILTIN_SOURCE_KEYS.has(d.source) &&
+      isPlatformSearchOn(d.source)
         ? (d.source as SearchSourceKey)
         : SEARCH_SOURCES[0].key;
     return { agg: d.agg, source };
@@ -109,15 +123,20 @@ export default function MusicExplorer() {
   // —— 视图（由内容区功能区左上角的「发现歌曲 / 播放列表」切换器驱动）与搜索 ——
   const tab = useMusicView();
   // 搜索渠道偏好（mp-search-channel）：首次进入（无缓存）默认聚合搜索；
-  // 之后记住上次选的渠道——聚合 or 单平台（含单源模式下选中的平台，供退出聚合后回显）
-  const [pref] = useState(readSearchChannelPref);
-  const [source, setSource] = useState<SearchSourceKey>(
-    pref?.source ?? SEARCH_SOURCES[0].key
-  );
+  // 之后记住上次选的渠道——聚合 or 单平台（含单源模式下选中的平台，供退出聚合后回显）。
+  // ⚠️ 不能在 useState 初始化里读 localStorage（旧实现 useState(readSearchChannelPref)）：
+  // SSR 首帧没有 localStorage → 服务端渲染为默认（聚合 / netease），客户端水合首次渲染
+  // 会读到缓存真实值 → 两端首帧不一致触发 hydration mismatch。因此状态先取默认值，
+  // 真实渠道偏好在挂载 effect 中恢复（见「挂载期本地恢复」）。
+  const [source, setSource] = useState<SearchSourceKey>(SEARCH_SOURCES[0].key);
   /** 聚合搜索模式：一次并发搜索全部可用音源，跨源合并去重 + 相关度打分排序展示 */
-  const [aggActive, setAggActive] = useState(pref?.agg ?? true);
+  const [aggActive, setAggActive] = useState(true);
   /** 部署侧启用 lx 音源脚本后动态加载的扩展搜索源（/api/music/lx?action=sources） */
   const [extSources, setExtSources] = useState<LxSearchSource[]>([]);
+  /** 部署期平台引擎开关矩阵（初始 = music-caps 模块默认；/api/music/caps 成功后覆盖并触发 chips 重算） */
+  const [platformCaps, setPlatformCaps] = useState<MusicPlatformFlags>(() =>
+    getPlatformCaps()
+  );
   const [keyword, setKeyword] = useState("");
   const [list, setList] = useState<SearchItem[] | null>(null);
   const [searchedKw, setSearchedKw] = useState("");
@@ -152,6 +171,8 @@ export default function MusicExplorer() {
   const [lyricRaw, setLyricRaw] = useState("");
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricError, setLyricError] = useState("");
+  /** AMLL 词库命中时的逐字行（毫秒级 words + 翻译）；未命中/不支持源时为 null */
+  const [amllRich, setAmllRich] = useState<AmllRichResult | null>(null);
   /** 原始 LRC 转换成的可下载 Blob 地址（详情弹窗「歌词链接」行点击下载用） */
   const [lyricBlobUrl, setLyricBlobUrl] = useState("");
 
@@ -199,8 +220,15 @@ export default function MusicExplorer() {
   /** 加载下一页防重入标记（ref 保证 onScroll / 补屏两个触发源不会并发翻页） */
   const pagingRef = useRef(false);
 
-  /** 全部可选的搜索源 chip（引擎注册表视图：内置 GD 源 + 动态 lx 扩展源），由 source-meta 统一构建 */
-  const sourceChips = useMemo(() => buildSearchChips(extSources), [extSources]);
+  /** 全部可选的搜索源 chip：平台全集（内置 GD 源 + 自研直连源 + 动态 lx 扩展源）∩ 搜索引擎开关
+   *  （music-caps，默认与部署一致；caps 到达后随本地矩阵更新重算）。开关关闭的平台不展示 → 不可被搜索。 */
+  const sourceChips = useMemo(
+    () =>
+      buildSearchChips(extSources).filter((c) =>
+        isPlatformSearchOn(c.key, platformCaps)
+      ),
+    [extSources, platformCaps]
+  );
 
   const sourceMeta = sourceChips.find((s) => s.key === source) ?? sourceChips[0];
 
@@ -213,11 +241,15 @@ export default function MusicExplorer() {
     return order;
   }, [sourceChips]);
 
-  /** 直链能力排序（聚合跨源同曲取“主副本”时用）：GD/lx 引擎可播 > 自研源（kugou/migu 无内置直链，
-   *  但配置 lx 音源兜底后点播可经音源脚本换链） */
+  /** 直链能力排序（聚合跨源同曲取“主副本”时用，rank 小者优先）：
+   *  gd（0，GD 通道直链/多档音质最稳）> lx 扩展源与 kugou（1，均有可播直链路径——脚本源
+   *  自带取链 / 酷狗内置官方试听直链 128k）> migu（2，SELF_ONLY_ENGINE_KEYS 无内置直链引擎，
+   *  仅配置 lx 音源兜底后才可播）。 */
   const playableKindRank = (item: SearchItem) => {
-    const kind = sourceEngineKindFor(item.source || "");
-    return kind === "self" ? 2 : kind === "lx" ? 1 : 0;
+    const source = item.source || "";
+    const kind = sourceEngineKindFor(source);
+    if (kind !== "self") return kind === "lx" ? 1 : 0;
+    return SELF_ONLY_ENGINE_KEYS.has(source) ? 2 : 1;
   };
 
   // 挂载时拉一次 lx 扩展源目录（成功后才出现扩展 chip；失败保持仅内置源，静默）。
@@ -233,6 +265,18 @@ export default function MusicExplorer() {
       .catch(() => {
         /* 目录不可用（未配置 / 通道故障）不打扰用户 */
       });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  // 拉取部署期平台引擎开关（MUSIC_PLATFORM_SEARCH / PLAY）：成功后把矩阵拷进本地状态并触发
+  // chips 重算。默认矩阵与后端一致，故失败 / 未到达时 UI 与后端行为仍然吻合，不打扰用户。
+  useEffect(() => {
+    let disposed = false;
+    refreshPlatformCaps().then((c) => {
+      if (!disposed) setPlatformCaps(c);
+    });
     return () => {
       disposed = true;
     };
@@ -258,11 +302,18 @@ export default function MusicExplorer() {
     };
   }, []);
 
-  // 播放列表本地缓存：仅当「上次在搜索面板上显式选过单平台渠道、且列表快照来源与该渠道一致」时，
-  // 挂载才回放该列表（继续上次会话、刷新后列表不销毁）。其余情况视为一次新的搜索会话——首屏保持
-  // 由渠道缓存决定的形态（无记录 / 上次聚合 → 聚合搜索），并把可能残留的旧单源快照清掉，避免上次
-  // 浏览过的平台（如 QQ音乐）每次打开都把界面拖回它的单源列表。
+  // 挂载期本地恢复（仅在客户端执行；不能在 useState 初始化读 localStorage，见渠道偏好处注释）：
+  //   1) 渠道偏好 mp-search-channel → 恢复聚合开关与「退出聚合后的回显平台」（无记录 → 保持默认）；
+  //   2) 播放列表本地缓存：仅当「上次在搜索面板上显式选过单平台渠道、且列表快照来源与该渠道一致」时，
+  //      才回放该列表（继续上次会话、刷新后列表不销毁）。其余情况视为一次新的搜索会话——首屏保持
+  //      默认（聚合搜索），并把可能残留的旧单源快照清掉，避免上次浏览过的平台（如 QQ音乐）每次打开
+  //      都把界面拖回它的单源列表。
   useEffect(() => {
+    const pref = readSearchChannelPref();
+    if (pref) {
+      setAggActive(pref.agg);
+      setSource(pref.source);
+    }
     const snap = readPlaylistSnapshot();
     if (!snap || !snap.list.length) return;
     if (!pref || pref.agg || pref.source !== snap.source) {
@@ -270,7 +321,7 @@ export default function MusicExplorer() {
       return;
     }
     // pref 为单平台渠道且与快照来源一致：回填列表并停在播放列表视图（pref.agg 已保证
-    // aggActive 初始为 false，无需重复写入；snap.source 必为内置源，chip 就绪）
+    // aggActive 为 false；snap.source 必为内置源，chip 就绪）
     setSource(snap.source as SearchSourceKey);
     setKeyword(snap.kw);
     setSearchedKw(snap.kw);
@@ -278,8 +329,7 @@ export default function MusicExplorer() {
     setPage(snap.page);
     setHasMore(snap.hasMore);
     setMusicView("playlist");
-    // 该 effect 只在挂载执行一次：pref / 回填用到的 setState 为稳定引用，pref 取首帧值
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 本 effect 只在挂载执行一次：pref / 回填用到的 setState 为稳定引用，pref 取当次读取值
   }, []);
 
   // 播放列表本地缓存：列表内容 / 页号变化即写快照（list 为 null 是新请求中或切源清空，
@@ -354,6 +404,7 @@ export default function MusicExplorer() {
     setLyricLines(null);
     setLyricRaw("");
     setLyricError("");
+    setAmllRich(null);
     resetSession();
   };
 
@@ -506,7 +557,7 @@ export default function MusicExplorer() {
   /**
    * 链接解析：把平台分享链接解析为归一曲目（source+id+元数据），作为单条播放
    * 列表插入；播放 / 下载 / 歌词 / 封面复用搜索结果的同一套链路。网易云 / QQ音乐 /
-   * 酷我链接当前可直接解析到播放；酷狗识别成功但直链引擎未接入时给出引导提示。
+   * 酷我 / 酷狗链接当前可直接解析到播放（酷狗经内置官方试听直链取链）。
    */
   const runResolve = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -535,8 +586,8 @@ export default function MusicExplorer() {
       if (data.status === "playable" && data.item) {
         const it = data.item;
         // 解析产物平台若与当前搜索源不一致则同步 chip，保证列表平台列 / 图标 / 直链通道一致。
-        // 只对 GD 引擎的 netease/kuwo/joox 同步；tencent 的自研搜索产物仍复用 GD 直链通道，
-        // 此处不把 chip 切到 QQ音乐——解析属于「单曲直达」而非搜索渠道切换，行内「来源」已单独
+        // 只对 GD 引擎的 netease/kuwo/joox 同步；tencent 等其余解析产物平台不在自研搜索
+        // chips 内，此处不切 chip——解析属于「单曲直达」而非搜索渠道切换，行内「来源」已单独
         // 展示 item.source，也避免把用户此前手选的搜索渠道带偏。
         const key = it.source as SearchSourceKey;
         if ((key === "netease" || key === "kuwo" || key === "joox") && key !== source) {
@@ -971,12 +1022,13 @@ export default function MusicExplorer() {
     return () => controller.abort();
   }, [coverUrl, coverFailed, picked, source, isDark]);
 
-  // 歌词
+  // 歌词（LRC 主通道 + AMLL 词库逐字通道并行）
   useEffect(() => {
     lyricAbortRef.current?.abort();
     setLyricLines(null);
     setLyricRaw("");
     setLyricError("");
+    setAmllRich(null);
     setLyricsLoading(false);
     if (!picked) return;
     const lyricId = picked.lyricId ?? picked.id ?? "";
@@ -986,24 +1038,43 @@ export default function MusicExplorer() {
     lyricAbortRef.current = controller;
     setLyricsLoading(true);
 
+    const srcName = picked.source || source;
     (async () => {
-      try {
-        const raw = await requestLyric(
-          picked.source || source,
-          lyricId,
-          controller.signal
-        );
-        if (controller.signal.aborted) return;
-        const lines = parseLrc(raw);
-        setLyricRaw(raw);
+      const lrcTask = requestLyric(srcName, lyricId, controller.signal).then(
+        (raw): { ok: true; raw: string } | { ok: false; err: unknown } => ({
+          ok: true,
+          raw,
+        }),
+        (err): { ok: true; raw: string } | { ok: false; err: unknown } => ({
+          ok: false,
+          err,
+        })
+      );
+      const richTask = sourceSupportsAmllLyric(srcName)
+        ? requestAmllLyric(srcName, lyricId, controller.signal)
+            .then((ttml) => (ttml ? parseTtmlAmll(ttml) : null))
+            .catch(() => null)
+        : Promise.resolve(null);
+
+      const [lrcResult, richResult] = await Promise.all([lrcTask, richTask]);
+      if (controller.signal.aborted) return;
+      const rich =
+        richResult && richResult.timed.length ? richResult : null;
+      if (lrcResult.ok) {
+        const lines = parseLrc(lrcResult.raw);
+        setLyricRaw(lrcResult.raw);
         setLyricLines(lines.length ? lines : null);
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          setLyricError(err instanceof Error ? err.message : "歌词加载失败");
-        }
-      } finally {
-        if (!controller.signal.aborted) setLyricsLoading(false);
+        // 词库命中 → 整页视图改用真逐字渲染；未命中保持 LRC 估算
+        setAmllRich(rich);
+      } else if (rich) {
+        // 平台 LRC 通道失败但词库命中：用词库句级行顶替，避免整页空态报错
+        setLyricLines(rich.timed);
+        setAmllRich(rich);
+      } else {
+        const err = lrcResult.err;
+        setLyricError(err instanceof Error ? err.message : "歌词加载失败");
       }
+      if (!controller.signal.aborted) setLyricsLoading(false);
     })();
 
     return () => controller.abort();
@@ -1128,13 +1199,13 @@ export default function MusicExplorer() {
       muted={muted}
       loop={loop}
       npViewCover={npViewCover}
-      activeLyricIndex={activeLyricIndex}
       coverUrl={coverUrl}
       coverFailed={coverFailed}
       lyricLines={lyricLines}
       lyricsLoading={lyricsLoading}
       lyricError={lyricError}
       lyricRaw={lyricRaw}
+      amllRich={amllRich}
       accentColor={sourceMeta.color}
       palette={palette}
       isMobile={isMobile}

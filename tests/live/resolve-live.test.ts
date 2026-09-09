@@ -103,21 +103,33 @@ describe.runIf(RUN)("/api/music/resolve · 真机全链路", () => {
   );
 
   it(
-    "酷狗 hash 链接 → engine-missing（引擎尚未接入）",
+    "酷狗 hash 链接 → playable（元数据走官方 getSongInfo；直链由播放端经 /api/music/self?action=url 实时取）",
     async () => {
       const res = await GETResolve(
         req(
           "/api/music/resolve",
           "link=" +
             encodeURIComponent(
-              "https://www.kugou.com/song/#hash=AC2C0B1F2D3E4A5B6C7D8E9F0A1B2C3"
+              "https://www.kugou.com/song/#hash=48C685F679FFC7CF08B8A8341CA9DB44"
             )
         )
       );
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.data.status).toBe("engine-missing");
       expect(json.data.platform).toBe("kugou");
+      expect(json.data.songId).toBe("48C685F679FFC7CF08B8A8341CA9DB44");
+      // 播放引擎开关关闭时降级为 engine-missing（与 playableResponse 契约一致）
+      if (json.data.status === "engine-missing") {
+        console.warn("[live] kugou 播放引擎当前停用（MUSIC_PLATFORM_PLAY），跳过 playable 断言");
+        return;
+      }
+      expect(json.data.status).toBe("playable");
+      const item = json.data.item;
+      expect(item.source).toBe("kugou");
+      expect(item.name.length).toBeGreaterThan(0);
+      if (json.data.metadata === "full") {
+        expect(item.artist.length).toBeGreaterThan(0);
+      }
     },
     LIVE_TIMEOUT
   );

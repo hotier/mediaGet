@@ -1,14 +1,16 @@
 // @ts-nocheck
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { GET } from "@/app/api/music/resolve/route";
 
 /**
  * resolve 路由集成单测：通过全局 fetch 打桩模拟各平台元数据上游与短链跟随，
  * 验证 400 / engine-missing / playable(full) / playable(fallback) 各分支的契约。
  *
- * 平台直链引擎矩阵（对齐 route.js 头注释）：
- *   netease / tencent / kuwo —— 直链引擎已接入（详情缺失时降级 fallback 仍可播放）；
- *   kugou —— 识别成功返回 engine-missing。
+ * 平台直链引擎矩阵（对齐 route.js 头注释 + music-platform-flags.js）：
+ *   netease / tencent / kuwo —— 直链引擎代码已接入，但 tencent 播放引擎默认停用
+ *   （部署侧需 MUSIC_PLATFORM_PLAY='{"tencent":true}' 才会 playable）；
+ *   kugou —— 内置官方 getSongInfo 元数据通道，默认播放引擎开启 → playable
+ *   （直链由播放端经 /api/music/self?action=url 实时取）。
  */
 
 async function callResolve(link) {
@@ -73,6 +75,7 @@ function kuwoSongInfoResponse() {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -90,8 +93,8 @@ describe("/api/music/resolve · 入参校验", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.code).toBe(400);
-    expect(json.supported.ready).toEqual(["netease", "tencent", "kuwo"]);
-    expect(json.supported.pending).toEqual(["kugou"]);
+    expect(json.supported.ready).toEqual(["netease", "tencent", "kuwo", "kugou"]);
+    expect(json.supported.pending).toEqual([]);
   });
 
   it("非受支持平台（spotify）→ 400", async () => {
@@ -155,7 +158,12 @@ describe("/api/music/resolve · 网易云（可解析到播放）", () => {
   });
 });
 
-describe("/api/music/resolve · QQ音乐（直链引擎已接入）", () => {
+describe("/api/music/resolve · QQ音乐（直链引擎已接入；播放引擎默认停用，需开关开启）", () => {
+  // tencent 播放引擎默认关：本组用例显式放开（模拟部署侧 MUSIC_PLATFORM_PLAY 配置后行为）
+  beforeEach(() => {
+    vi.stubEnv("MUSIC_PLATFORM_PLAY", JSON.stringify({ tencent: true }));
+  });
+
   it("songDetail 链接 + 详情成功 → playable + metadata=full（songmid 原样落 item）", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => qqSongInfoResponse()));
     const res = await callResolve("https://y.qq.com/n/ryqq/songDetail/0039MnYb0p1iXz");
@@ -195,6 +203,32 @@ describe("/api/music/resolve · QQ音乐（直链引擎已接入）", () => {
   });
 });
 
+describe("/api/music/resolve · 平台播放引擎开关（MUSIC_PLATFORM_PLAY）", () => {
+  // 未配置 / 清空开关 = 回退默认：tencent 播放引擎停用 → engine-missing（netease/kuwo 默认开启不受影响）
+  beforeEach(() => {
+    vi.stubEnv("MUSIC_PLATFORM_PLAY", "");
+  });
+
+  it("tencent 默认停用 → QQ songDetail 识别成功但 engine-missing，message 指引开关", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => qqSongInfoResponse()));
+    const res = await callResolve("https://y.qq.com/n/ryqq/songDetail/0039MnYb0p1iXz");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.status).toBe("engine-missing");
+    expect(json.data.platform).toBe("tencent");
+    expect(json.data.songId).toBe("0039MnYb0p1iXz");
+    expect(json.data.message).toContain("MUSIC_PLATFORM_PLAY");
+  });
+
+  it("netease 默认开启 → 不受播放引擎开关影响仍 playable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => neteaseDetailResponse()));
+    const res = await callResolve("https://music.163.com/song?id=186016");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.status).toBe("playable");
+  });
+});
+
 describe("/api/music/resolve · 酷我（直链引擎已接入）", () => {
   it("play_detail 链接 + 详情成功 → playable + metadata=full（封面升级 https）", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => kuwoSongInfoResponse()));
@@ -224,16 +258,73 @@ describe("/api/music/resolve · 酷我（直链引擎已接入）", () => {
   });
 });
 
-describe("/api/music/resolve · 酷狗（识别成功但引擎未接入）", () => {
-  it("kugou hash 链接 → engine-missing 且消息说明可解析平台", async () => {
-    const res = await callResolve(
-      "https://www.kugou.com/song/#hash=AC2C0B1F2D3E4A5B6C7D8E9F0A1B2C3"
+describe("/api/music/resolve · 酷狗（内置官方直链引擎已接入）", () => {
+  const KUGOU_LINK =
+    "https://www.kugou.com/song/#hash=AC2C0B1F2D3E4A5B6C7D8E9F0A1B2C3D";
+  // 用例间 hash 需不同：详情结果进程内缓存 5 分钟，同 key 会在用例间串扰
+  const KUGOU_LINK_VIP =
+    "https://www.kugou.com/song/#hash=b12c0b1f2d3e4a5b6c7d8e9f0a1b2c3d";
+  const KUGOU_LINK_FALLBACK =
+    "https://www.kugou.com/song/#hash=c34c0b1f2d3e4a5b6c7d8e9f0a1b2c3e";
+
+  it("getSongInfo 成功 → playable + metadata=full（hash 归一大写、封面直链 https）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonRes({
+          status: 1,
+          url: "https://sharefs.kugou.com/20260909/xx/1.mp3",
+          bitRate: 128,
+          songName: "广东爱情故事",
+          author_name: "广东雨神",
+          album_img: "http://imge.kugou.com/stdmusic/{size}/cover.jpg",
+        })
+      )
     );
+    const res = await callResolve(KUGOU_LINK);
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.data.status).toBe("engine-missing");
+    expect(json.data.status).toBe("playable");
     expect(json.data.platform).toBe("kugou");
-    expect(json.data.songId).toBe("AC2C0B1F2D3E4A5B6C7D8E9F0A1B2C3");
-    expect(json.data.message).toContain("酷狗直链解析引擎尚未接入");
+    expect(json.data.songId).toBe("AC2C0B1F2D3E4A5B6C7D8E9F0A1B2C3D");
+    expect(json.data.metadata).toBe("full");
+    expect(json.data.item.name).toBe("广东爱情故事");
+    expect(json.data.item.artist).toEqual(["广东雨神"]);
+    expect(json.data.item.source).toBe("kugou");
+    expect(json.data.item.picUrlDirect).toBe(
+      "https://imge.kugou.com/stdmusic/400/cover.jpg"
+    );
+  });
+
+  it("getSongInfo 带元数据但 url 为空（VIP/付费档）→ 仍 playable 返回曲名（点播时才报 vip-only）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonRes({
+          status: 0,
+          url: "",
+          error: "需要付费",
+          privilege: 10,
+          songName: "晴天",
+          author_name: "周杰伦",
+        })
+      )
+    );
+    const res = await callResolve(KUGOU_LINK_VIP);
+    const json = await res.json();
+    expect(json.data.status).toBe("playable");
+    expect(json.data.metadata).toBe("full");
+    expect(json.data.item.name).toBe("晴天");
+  });
+
+  it("getSongInfo 无元数据 → playable + metadata=fallback 占位标题", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ nope: true })));
+    const res = await callResolve(KUGOU_LINK_FALLBACK);
+    const json = await res.json();
+    expect(json.data.status).toBe("playable");
+    expect(json.data.metadata).toBe("fallback");
+    expect(json.data.item.name).toBe(
+      "酷狗歌曲 C34C0B1F2D3E4A5B6C7D8E9F0A1B2C3E"
+    );
   });
 });

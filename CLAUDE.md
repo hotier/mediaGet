@@ -7,7 +7,7 @@
 `mediaGet`（品牌「即刻解析」，线上 <https://get.hotier.cc.cd>）是一个 Next.js 15（App Router + React 19）解析下载站，含两大产品模块：
 
 1. **视频/图文/音乐内容解析（首页 `/`）**：支持 **21 个平台**（抖音、快手、微博、哔哩哔哩、小红书、汽水音乐、皮皮虾、皮皮搞笑、西瓜视频、最右、虎牙、AcFun、全民K歌、QQ音乐、六间房、新片场、好看视频、TikTok、X/Twitter、Instagram、YouTube），输入分享链接 / 整段分享文案 /（部分平台）`source+id`，自动识别平台与内容类型并输出无水印直链。
-2. **音乐解析中心（`/music`）**：多源聚合搜歌 / 试听 / 播放 / 歌词 / 封面 / 下载——默认 GD 聚合上游（`/api/music`，网易云/酷我/JOOX 等搜索）+ 自研直连搜索（`/api/music/self`，服务器直连腾讯/酷狗/咪咕等五家搜索，独立搜索源 chips）+ 洛雪(lx-music) 自定义音源（`/api/music/lx`）+ 歌曲链接解析（`/api/music/resolve`，网易云 / QQ音乐 / 酷我 ready，酷狗 pending）。
+2. **音乐解析中心（`/music`）**：多源聚合搜歌 / 试听 / 播放 / 歌词 / 封面 / 下载——默认 GD 聚合上游（`/api/music`，网易云/酷我/JOOX 等搜索）+ 自研直连搜索（`/api/music/self`，服务器直连腾讯/酷狗/咪咕等五家搜索，独立搜索源 chips）+ 洛雪(lx-music) 自定义音源（`/api/music/lx`）+ 歌曲链接解析（`/api/music/resolve`，网易云 / QQ音乐 / 酷我识别，酷狗与「默认停用播放引擎的 QQ」返回 `engine-missing`）。平台「搜索引擎 / 播放引擎」为部署可配开关（env `MUSIC_PLATFORM_SEARCH` / `MUSIC_PLATFORM_PLAY` 正向覆盖，另有 `MUSIC_PLATFORM_SEARCH_DISABLED` / `MUSIC_PLATFORM_PLAY_DISABLED` 黑名单与整体下线便捷变量 `MUSIC_PLATFORM_OFF` 作最终闸门，默认停用 QQ 搜索与 QQ/酷狗/咪咕播放，见 API.md §12）。
 
 另有静态页：FAQ（`/faq`）、法律页（`/legal/{terms,privacy,dmca}`）、`robots.ts` / `sitemap.ts`；全站 PWA、深浅主题（默认跟随系统）。
 
@@ -41,7 +41,7 @@ npm run build:cf     # OpenNext Cloudflare 构建（产物 .open-next/）
 **音乐接口**：
 - `/api/music`（provider=gd）：`lib/gdmusic.js` 按 GD(gdstudio) 契约组装 `types=url/search/pic/lyric` 请求，`getUpstreamBases` 多基址按序回退（8s 总预算）。action 支持 `search/pic/lyric/url(默认)`；另有 `bin=1`（url→音频字节代理下载带音质标签文件名；pic→封面字节同源取色）与 `fmt=text`。搜索 action 仅开放 netease/kuwo/joox。
 - `/api/music/self`（自研直连搜索，仅 `action=search`）：`lib/self-search/`（index/errors + netease/tencent/kugou/kuwo/migu 每平台一模块，移植 lx-music musicSdk 并自研签名）服务器直连五家搜索 API，source 沿用 GD 命名，归一为 GD 搜索同契约 SearchItem（line 标注 `kind=self`）。三条价值：(1) tencent/kugou/migu 是 GD 未开放搜索的**独立搜索源 chips**；(2) netease/kuwo 双通道：搜索以本通道为主（自研失败才回退 GD 搜索引擎，并会话置位让后续翻页直接走 GD）；(3) 封面不强求——搜索响应能内嵌的写入 `picUrlDirect` 直接展示，不做二次换取。tencent/netease/kuwo 产物 id 与其 GD 直链通道所需 id 一致，可无缝复用直链/歌词/封面；kugou/migu 无内置直链引擎：前端点播/切音质统一走 music-client `requestPlayDirect`——先试 GD 主通道，失败或无引擎时按「平台→lx 音源 source」映射（默认 netease→wy、tencent→tx、kuwo→kw、kugou→kg、migu→mg，环境变量 `MUSIC_LX_URL_FALLBACKS` 可增改/关闭）自动改由音源脚本同曲取链；映射随 `/api/music/lx?action=sources` 的 urlFallbacks 下发，且仅当脚本确实注册了该 source 才生效。未配置映射/脚本时保持原「该音源自研搜索结果仅供识别，暂未接入试听直链引擎」提示。
-- `/api/music/lx`（provider=lx）：洛雪生态自定义音源。`lib/lx-provider.js` 管脚本配置（`MUSIC_LX_SCRIPTS` 的 URL / 本地路径条目 + `MUSIC_LX_SCRIPTS_DIR` 目录扫描 + 仓库 `.lxref/scripts/` 默认目录自动加载，同名 id 保留首份；调度含 TTL 缓存、并发执行、quality 映射），`lib/lx-host.js` 用 `node:vm` 沙箱执行第三方脚本（**脚本视为不可信代码**，只暴露白名单 `fetch` 代理，不得放 Node 原生能力）。action：`sources/search/url/lyric`。仅 Node runtime，无浏览器直连兜底。
+- `/api/music/lx`（provider=lx）：洛雪生态自定义音源。`lib/lx-provider.js` 管脚本配置（`MUSIC_LX_SCRIPTS` 的 URL / 本地路径条目 + `MUSIC_LX_SCRIPTS_DIR` 目录扫描 + 进程 cwd 下 `.lxref/scripts/` 默认目录自动加载（目录存在即扫描，仓库不随附脚本），同名 id 保留首份；调度含 TTL 缓存、并发执行、quality 映射），`lib/lx-host.js` 用 `node:vm` 沙箱执行第三方脚本（**脚本视为不可信代码**，只暴露白名单 `fetch` 代理，不得放 Node 原生能力）。action：`sources/search/url/lyric`。仅 Node runtime，无浏览器直连兜底。
 - `/api/music/resolve`：`lib/music-link.ts` 纯函数识别链接（SSRF 面收敛：不直接请求用户链接，官方短链 `163cn.tv` / `c.y.qq.com` 等服务端跟随一次重定向）→ 按平台直链引擎补元数据并产出 SearchItem，播放直链由 `/api/music` `action=url` 实时取（不预取）。网易 ready（`lib/netease-meta.js`，官方 song/detail）、QQ音乐 ready（`lib/qqmusic.js` songinfo，songmid 走 GD tencent 源）、酷我 ready（`lib/kuwo-meta.js`，m.kuwo.cn H5 songinfo，rid 走 GD kuwo 源）；各平台详情失败均降级占位标题仍可播（`metadata=fallback`），详情成功各自缓存 5 分钟。酷狗识别成功仍 `engine-missing`（GD 无 kugou source，直链通道未建），无法识别 400。
 
 **资源代理**：`/api/video-proxy`（视频流：按平台补 Referer 防盗链、Range/206、download=1、twitter CDN 特殊处理；超时/重试）与 `/api/image`（图片字节代理，内存 LRU 6h，小红书/微博/快手图床需带 Referer）。前端是否走代理由 `utils/videoProxy.ts` 判定。
@@ -72,7 +72,7 @@ npm run build:cf     # OpenNext Cloudflare 构建（产物 .open-next/）
 - Instagram：`IG_COOKIE`（强烈建议）、`IG_TIMEOUT_MS`（默认 20000）。
 - QQ音乐 source+id：`QQMUSIC_COOKIE`（可选，vkey 试听接口）。X/Twitter：`TWITTER_FIXER_SERVICES`（可选，覆盖 fixer 集）。
 - YouTube：`YOUTUBE_PIPED_HOSTS`（默认内置 3 个公共 Piped 候选）、`YOUTUBE_INVIDIOUS_HOSTS`（默认**不启用**，需显式配置或自托管）、`YOUTUBE_API_KEY`（Data API v3，仅优先元数据，无直链）、`YOUTUBE_API_TIMEOUT_MS`（默认 5000）、`YOUTUBE_SOURCE_TIMEOUT_MS`（默认 6000）。yt-dlp 已不参与 YouTube。
-- 音乐：`MUSIC_API_BASE` / `MUSIC_API_BASES`（GD 契约上游链；公共实例对数据中心出口会被 CF 人机校验拦，线上需自建可直连实例）、`MUSIC_LX_SCRIPTS`（洛雪脚本，URL / file:// / 本地路径，多个逗号/空格分隔或 JSON 数组）、`MUSIC_LX_SCRIPTS_DIR`（可选，脚本目录，目录内每个 *.js 视为一个脚本）、`MUSIC_LX_SCRIPT_TTL_MS`（默认 6h）。未设置 `MUSIC_LX_SCRIPTS_DIR` 时仓库根目录的 `.lxref/scripts/` 自动加载（开发/Docker“放入即生效”）。自研直连搜索（`/api/music/self`）为代码内直连实现，无需额外环境变量。
+- 音乐：`MUSIC_API_BASE` / `MUSIC_API_BASES`（GD 契约上游链；公共实例对数据中心出口会被 CF 人机校验拦，线上需自建可直连实例）、`MUSIC_LX_SCRIPTS`（洛雪脚本，URL / file:// / 本地路径，多个逗号/空格分隔或 JSON 数组）、`MUSIC_LX_SCRIPTS_DIR`（可选，脚本目录，目录内每个 *.js 视为一个脚本）、`MUSIC_LX_SCRIPT_TTL_MS`（默认 6h）。未设置 `MUSIC_LX_SCRIPTS_DIR` 时，进程 cwd 下若存在 `.lxref/scripts/` 则自动加载（开发本机“放入即生效”；仓库不随附脚本，Docker 需自行内置或挂载）。自研直连搜索（`/api/music/self`）为代码内直连实现，无需额外环境变量。
 - 统计：`TURSO_DB_URL` + `TURSO_AUTH_TOKEN`（未配置静默禁用）、`STATS_API_KEY`（`/api/stats` Bearer，未配置 403）。
 - 开关：`VIDEO_PARSE_ENABLED`（`"true"` 才放开视频解析入口，wrangler `[vars]` 已配）。
 - 蜜罐：`NEXT_PUBLIC_SITE_URL`（蜜罐页引导 URL 前缀，默认站点）。

@@ -18,7 +18,16 @@
     "build:cf": "opennextjs-cloudflare build"
   },
   "dependencies": {
+    "@applemusic-like-lyrics/core": "^0.5.2",
+    "@applemusic-like-lyrics/react": "^0.5.2",
     "@ducanh2912/next-pwa": "^10.2.9",
+    "@pixi/app": "^7.4.3",
+    "@pixi/core": "^7.4.3",
+    "@pixi/display": "^7.4.3",
+    "@pixi/filter-blur": "^7.4.3",
+    "@pixi/filter-bulge-pinch": "^5.1.1",
+    "@pixi/filter-color-matrix": "^7.4.3",
+    "@pixi/sprite": "^7.4.3",
     "@radix-ui/react-collapsible": "^1.1.20",
     "@radix-ui/react-label": "^2.1.15",
     "@radix-ui/react-slot": "^1.3.3",

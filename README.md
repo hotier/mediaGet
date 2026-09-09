@@ -29,9 +29,9 @@
 ### 音乐解析（`/music`）
 
 - 多源聚合在线搜歌 / 试听 / 播放 / 滚动歌词 / 封面 / 下载
-- 默认上游覆盖网易云 / 酷我 / JOOX 等曲库（GD 契约，支持多基址回退）；内置腾讯(QQ音乐) / 酷狗 / 咪咕 **自研直连搜索** chips（服务器直连各家搜歌，网易云 / 酷我在 GD 通道不可用时自动回退该通道）；并支持洛雪（lx-music）生态自定义音源扩展；支持**聚合搜索**：一次并发搜索全部可用音源，跨源同曲自动去重、按关键词相关度打分排序展示（单源搜索照旧保留）
-- 网易云 / QQ音乐 / 酷我 歌曲链接可一键解析为单曲（元数据 + 播放 / 下载）；酷狗链接已可识别、直链引擎待接入；酷狗 / 咪咕自研搜索结果默认仅搜索识别——配置洛雪聚合音源脚本后，点播 / 切音质会自动改由音源脚本按同曲 hash/id 换直链试听
-- **洛雪自定义音源接入**：单文件洛雪协议音源脚本（qdy / qsvip 类）可经 `MUSIC_LX_SCRIPTS`（URL / 本地路径，可多个）、`MUSIC_LX_SCRIPTS_DIR`（脚本目录）或直接放进仓库 `.lxref/scripts/`（本地开发与 Docker“放入即生效”）加载；脚本源码 TTL 内缓存、目录变化下次自动生效，播放失败时也会把这些扩展源纳入“跨源现搜”换源兜底；另支持「平台→音源脚本取直链兜底」：netease/tencent/kuwo/kugou/migu 曲目在自身直链失败（VIP 受限等）或无内置直链时，自动改由已注册的对应音源脚本按同曲 id/hash/songmid 换链（默认映射 wy/tx/kw/kg/mg，可用 `MUSIC_LX_URL_FALLBACKS` 增改或关闭）
+- 默认上游覆盖网易云 / 酷我 / JOOX 等曲库（GD 契约，支持多基址回退）；内置腾讯(QQ音乐) / 酷狗 / 咪咕 **自研直连搜索** chips（服务器直连各家搜歌，网易云 / 酷我在 GD 通道不可用时自动回退该通道）；并支持洛雪（lx-music）生态自定义音源扩展；支持**聚合搜索**：一次并发搜索全部可用音源，跨源同曲自动去重、按关键词相关度打分排序展示（单源搜索照旧保留）。平台「搜索引擎 / 播放引擎」为部署可配开关（`MUSIC_PLATFORM_SEARCH` / `MUSIC_PLATFORM_PLAY`，默认 QQ 搜索停用、QQ/酷狗/咪咕播放停用）
+- 网易云 / QQ音乐 / 酷我 歌曲链接可一键解析为单曲（元数据 + 播放 / 下载，QQ 受播放引擎开关约束、默认返回 `engine-missing`，部署侧放开后即可播放）；酷狗链接已可识别、直链引擎待接入；酷狗 / 咪咕自研搜索结果默认仅搜索识别——配置洛雪聚合音源脚本后，点播 / 切音质会自动改由音源脚本按同曲 hash/id 换直链试听
+- **洛雪自定义音源接入**：单文件洛雪协议音源脚本（qdy / qsvip 类）可经 `MUSIC_LX_SCRIPTS`（URL / 本地路径，可多个）、`MUSIC_LX_SCRIPTS_DIR`（脚本目录）或直接放进本地 `.lxref/scripts/`（开发本机“放入即生效”，仓库默认不随附脚本，Docker 需自行内置或运行时挂载，见下方部署）加载；脚本源码 TTL 内缓存、目录变化下次自动生效，播放失败时也会把这些扩展源纳入“跨源现搜”换源兜底；另支持「平台→音源脚本取直链兜底」：netease/tencent/kuwo/kugou/migu 曲目在自身直链失败（VIP 受限等）或无内置直链时，自动改由已注册的对应音源脚本按同曲 id/hash/songmid 换链（默认映射 wy/tx/kw/kg/mg，可用 `MUSIC_LX_URL_FALLBACKS` 增改或关闭）
 
 ### 站点
 
@@ -81,7 +81,7 @@ docker build -t mediaget:latest .
 docker run -d -p 3000:3000 --env-file .env mediaget:latest
 ```
 
-需要启用洛雪自定义音源时，把脚本（如 `qdy.js`）放进仓库根目录 `.lxref/scripts/` 再 `docker build`，镜像即内置并在启动后自动加载（构建上下文默认包含该目录）；也可以运行时用 `MUSIC_LX_SCRIPTS_DIR` 挂载目录覆盖。
+仓库默认不随附洛雪(lx)音源脚本（第三方脚本属不可信代码，需自行准备并确认可信）。需要启用时：本地开发可直接把脚本放进根目录 `.lxref/scripts/`，启动即自动加载；Docker 部署建议运行时挂载 `MUSIC_LX_SCRIPTS_DIR`（如 `docker run -v /path/to/scripts:/lx-scripts -e MUSIC_LX_SCRIPTS_DIR=/lx-scripts ...`），或在 `Dockerfile` 中自行加一行 `.lxref/scripts` 的 COPY（见文件内注释）随镜像内置。
 
 ## 许可证
 

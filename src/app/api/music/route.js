@@ -12,6 +12,11 @@ import {
 import { honeypotResponse } from "@/lib/honeypot";
 import { normalizeResult } from "@/lib/normalize-result";
 import {
+  MUSIC_FLAG_PLATFORM_KEYS,
+  isPlatformPlayEnabled,
+  isPlatformSearchEnabled,
+} from "@/lib/music-platform-flags";
+import {
   GD_BRS,
   GD_DEFAULT_BR,
   GD_DEFAULT_SOURCE,
@@ -254,13 +259,15 @@ export async function GET(request) {
         400
       );
     }
-    if (!isSearchableSource(source)) {
+    if (!isSearchableSource(source) || !isPlatformSearchEnabled(source)) {
       return send(
         {
           code: 400,
-          msg: `该 music source 暂不支持关键词搜索：${source}`,
+          msg: isSearchableSource(source)
+            ? `该平台搜索引擎已停用：${source}（部署侧配置 MUSIC_PLATFORM_SEARCH 可开启）`
+            : `该 music source 暂不支持关键词搜索：${source}`,
           usage: "/api/music?action=search&source=netease&keyword=<关键词>",
-          supportedSources: GD_SEARCH_SOURCE_LIST,
+          supportedSources: GD_SEARCH_SOURCE_LIST.filter(isPlatformSearchEnabled),
         },
         400
       );
@@ -643,6 +650,23 @@ export async function GET(request) {
         msg: `不支持的 music source: ${source}`,
         usage,
         supportedSources: GD_SOURCE_LIST,
+      },
+      400
+    );
+  }
+  // 平台播放引擎开关：仅约束「面向用户平台」的取链（其余 GD 源交给上游自证），
+  // 关闭的平台走拦截（置 failType=source-unavailable 语义，见 URL_FAILURE 处理）
+  if (MUSIC_FLAG_PLATFORM_KEYS.includes(source) && !isPlatformPlayEnabled(source)) {
+    return send(
+      {
+        code: 400,
+        msg: `该平台播放引擎已停用：${source}（部署侧配置 MUSIC_PLATFORM_PLAY 可开启）`,
+        usage,
+        failType: MUSIC_FAILURE.SOURCE_UNAVAILABLE,
+        supportedSources: GD_SOURCE_LIST.filter(
+          (key) =>
+            !MUSIC_FLAG_PLATFORM_KEYS.includes(key) || isPlatformPlayEnabled(key)
+        ),
       },
       400
     );

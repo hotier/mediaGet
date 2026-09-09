@@ -525,6 +525,8 @@ GET /api/health
 > 上游支持**多基址回退链**：环境变量 `MUSIC_API_BASES`（逗号/空白分隔，按序）或单基址 `MUSIC_API_BASE` 覆盖默认公共实例；每类上游请求按序尝试，主源网络异常 / HTTP 错误 / CF 风控页时自动切换下一个基址（业务级 `rejected` / `not-found` 不回退），总耗时受 8s 预算约束并均分到剩余基址。注意：接入基址必须同为 gdstudio 契约（`types=search/url/pic/lyric` 参数一致）且对该部署出口可达——实测不可达的地址只会拖慢失败；可用线上请求日志 `music … all bases down … reason=` 定位不可用的基址。若基址均不可达，最终仍回落到 `502 sources-down`，前端 `music-client.ts` 随即走浏览器直连兜底（用户民用网络不受数据中心出口拦截影响）。
 
 > 若 GD 代理与浏览器直连通道均不可用，`netease`/`kuwo` 的搜索会自动回退到**自研直连搜索通道**（`/api/music/self`）；此外 `tencent`/`kugou`/`migu` 在 GD 未开放搜索，作为内置自研搜索源 chips 直接走该通道（见 12.5）。
+>
+> **平台能力开关（部署可配，2026-09）**：对面向用户的 6 平台（`netease`/`tencent`/`kugou`/`kuwo`/`migu`/`joox`）维护二维开关——`search`（搜索引擎）与 `play`（播放引擎 = 取直链通道）。后端唯一真源 `src/lib/music-platform-flags.js`，可用 env `MUSIC_PLATFORM_SEARCH` / `MUSIC_PLATFORM_PLAY` 正向覆盖，或用 `MUSIC_PLATFORM_SEARCH_DISABLED` / `MUSIC_PLATFORM_PLAY_DISABLED` 黑名单按平台列表强制停用（另有 `MUSIC_PLATFORM_OFF` 便捷变量把平台整体下线 = 同时写入两个黑名单；最终闸门，格式见「环境变量配置」）。默认值：`search` 仅停 `tencent`，其余开启；`play` 仅开 `netease`/`kuwo`/`joox`（`tencent`/`kugou`/`migu` 停用）。开关关闭 = 前端不展示该源 chip / 候选，后端 `action=search` / `action=url` 拒绝并回 400 `source-unavailable`（`supportedSources` 随开关过滤，文案含开启指引）；歌词 / 封面 / 链接识别等数据通道不受约束；lx 脚本扩展源与 GD-only 源不在全集内，恒视为启用。生效矩阵经 `/api/music/caps` 下发前端（见 12.7）。
 
 | action | 能力 | 适用场景 |
 |--------|------|----------|
@@ -554,7 +556,7 @@ GET /api/health
 **示例请求**:
 ```
 GET /api/music?source=netease&id=347230&br=128
-GET /api/music?source=tencent&id=0039MnYb0qxYhV&br=320
+GET /api/music?source=kuwo&id=777777&br=320
 GET /api/music?source=netease&id=347230&br=999&fmt=text
 ```
 
@@ -662,7 +664,7 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 | 状态码 | failType | 场景 |
 |--------|----------|------|
 | 400 | - | 参数非法：`source` 不在白名单 / `br` 不在可选值 / `id` 缺失 / 搜索 `keyword` 为空 / `pic` 缺 `id` |
-| 400 | `source-unavailable` | source 在上游侧被拒（暂未开放/不可用）；搜索源未开放 |
+| 400 | `source-unavailable` | source 在上游侧被拒（暂未开放/不可用）；搜索源未开放；或该平台 `search` / `play` 开关关闭（默认即 tencent 播放引擎、kugou/migu 播放引擎与 tencent 搜索；部署侧 `MUSIC_PLATFORM_SEARCH` / `MUSIC_PLATFORM_PLAY` 可开启，文案含指引） |
 | 404 | `not-found` | 直链：曲目不存在或该源无可用音源；封面：pic_id 无效或无专辑封面 |
 | 502 | `sources-down` | 上游接口网络异常 / 响应无法解析 |
 
@@ -677,7 +679,7 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 **脚本来源三种配置方式可叠加（详见下方 env 样例）**:
 1. `MUSIC_LX_SCRIPTS`：脚本 URL / `file://` / 本地文件路径（多个以英文逗号、空格分隔，或 JSON 数组 `[{"id":"qsvip","url":"..."}]`）；
 2. `MUSIC_LX_SCRIPTS_DIR`：脚本目录，目录内每个 `*.js` 按文件名为一个脚本加载；
-3. 未设置 `MUSIC_LX_SCRIPTS_DIR` 时，仓库根目录 `.lxref/scripts/` 若存在则自动加载其中全部 `*.js`（本地开发与 Docker 部署“放入即生效”）。同名脚本 id 只保留最先配置的一份。
+3. 未设置 `MUSIC_LX_SCRIPTS_DIR` 时，进程 cwd 下 `.lxref/scripts/` 目录若存在则自动加载其中全部 `*.js`（本地开发“放入即生效”；仓库默认不随附脚本，Docker 需自行内置该目录或运行时挂载 `MUSIC_LX_SCRIPTS_DIR`）。同名脚本 id 只保留最先配置的一份。
 
 | action | 能力 | 说明 |
 |--------|------|------|
@@ -709,6 +711,8 @@ GET /api/music?action=pic&source=netease&id=109951173569626660&size=300
 该通道承载两类用途：
 1. **独立搜索源 chips（tencent / kugou / migu）**：GD 未开放这三家搜索（kugou/migu 连直链引擎也没有），前端把三家注册为内置搜索源 chip 直接走本通道；
 2. **双通道源（netease / kuwo）的搜索主通道**：netease / kuwo 的搜索以本通道为主；自研通道失败时前端才回退 GD 搜索引擎（同源代理 → 浏览器直连），并把该源会话置位——后续翻页直接走 GD，不再每次空转本通道。
+
+> 各源是否可被调用还受平台能力矩阵的 `search` 开关约束（见 12 开头；默认仅 `tencent` 停用）：开关关闭的源（默认即 tencent）即使实现存在也不展示 chip、不接受请求——返回 400 `source-unavailable`（文案含「可配置 MUSIC_PLATFORM_SEARCH 开启」），响应 `supportedSources` 只列出当前放开的源。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -772,7 +776,7 @@ GET /api/music/self?source=kugou&keyword=晴天
 | 状态码 | failType | 场景 |
 |--------|----------|------|
 | 400 | - | 参数非法：`action` 非 `search` / `source` 不在白名单（响应带 `supportedSources`）/ `keyword` 为空 |
-| 400 | `source-unavailable` | source 不在自研搜索白名单（与上同） |
+| 400 | `source-unavailable` | source 不在自研搜索白名单，或该平台搜索引擎开关关闭（部署侧 `MUSIC_PLATFORM_SEARCH` 停用，默认 `tencent`；文案含开启指引） |
 | 502 | `sources-down` | 该源搜索接口网络异常 / 响应无法解析 / 命中平台风控 |
 
 > 成功结果走进程内存 5 分钟缓存（与主接口一致），IP 级限流 / 黑名单拦截与主接口同策略。
@@ -786,10 +790,34 @@ GET /api/music/self?source=kugou&keyword=晴天
 | 状态 | 说明 |
 |------|------|
 | `playable` | 网易云 / QQ音乐 / 酷我歌曲已识别并补齐元数据：`data { status, platform, songId, metadata: "full"\|"fallback", item }`。`metadata="full"` 表示官方详情成功取回（封面为图床直链 `item.picUrlDirect`）；详情通道失败不致命，自动降级为 ID 占位标题，仍可播放 / 下载 |
-| `engine-missing` | 已识别为酷狗歌曲（直链引擎尚未接入）：`data { status, platform, songId, message }` |
+| `engine-missing` | 已识别为酷狗歌曲（直链引擎尚未接入）；QQ音乐（`tencent`）在播放引擎开关默认停用时同样回此态（部署侧放开 `MUSIC_PLATFORM_PLAY` 后恢复 `playable`）：`data { status, platform, songId, message }`，`message` 含开关指引 |
 | HTTP 400 | 无法识别（非歌曲详情页链接，如歌单 / 歌手主页 / 视频页 / 未知 host），响应带 `supported: { ready: ["netease", "tencent", "kuwo"], pending: ["kugou"] }` |
 
-> 受支持链接示例：`https://music.163.com/song?id=347230`、`https://y.qq.com/n/ryqq/songDetail/<songmid>`、`https://www.kuwo.cn/play_detail/<rid>`、`163cn.tv` 分享短链、整段分享文案（自动抽链）。直链引擎 = 官方元数据通道 + GD 直链通道的组合（QQ 以 songmid、酷我以 rid 走 GD `action=url`），网易云详情走官方 song/detail；三平台详情成功时各自缓存 5 分钟，直链不在本接口预取，由播放端按 `id` 实时请求。
+> 受支持链接示例：`https://music.163.com/song?id=347230`、`https://y.qq.com/n/ryqq/songDetail/<songmid>`、`https://www.kuwo.cn/play_detail/<rid>`、`163cn.tv` 分享短链、整段分享文案（自动抽链）。直链引擎 = 官方元数据通道 + GD 直链通道的组合（QQ 以 songmid、酷我以 rid 走 GD `action=url`，但受该平台 `play` 播放引擎开关约束），网易云详情走官方 song/detail；三平台详情成功时各自缓存 5 分钟，直链不在本接口预取，由播放端按 `id` 实时请求。
+
+### 12.7 平台能力矩阵
+
+**接口**: `GET /api/music/caps`（`runtime=nodejs`，无鉴权，前端 `src/lib/music-caps.ts` 启动时拉取）
+
+**说明**: 下发「平台搜索引擎 / 播放引擎」的生效矩阵（env `MUSIC_PLATFORM_SEARCH` / `MUSIC_PLATFORM_PLAY` 合并内置默认后的结果），供前端首帧过滤 chips / 聚合候选源，保证部署侧开关与 UI 一致。前端在请求到达前先按与后端同值的内置默认矩阵渲染，拉取成功后再按覆盖结果刷新（失败静默保留默认）。
+
+**响应示例**:（字段示意，截取 6 平台中的两行；实际 `search`/`play` 与 `platforms` 均含全部 6 平台键）
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "defaults": { "search": { "netease": true, "tencent": false }, "play": { "netease": true, "tencent": false } },
+    "flags": { "search": { "netease": true, "tencent": false }, "play": { "netease": true, "tencent": false } },
+    "platforms": [
+      { "key": "netease", "search": true, "play": true, "selfSearch": true },
+      { "key": "tencent", "search": false, "play": false, "selfSearch": true }
+    ]
+  }
+}
+```
+
+> `defaults` 为内置默认矩阵，`flags` 为 env 覆盖后的生效矩阵（与 `defaults` 相等即未配置任何覆盖）；`platforms` 面向 UI 逐平台展开，`selfSearch` 标注该平台是否存在自研直连搜索实现。仅面向用户的 6 平台（`netease`/`tencent`/`kugou`/`kuwo`/`migu`/`joox`）在此矩阵内；lx 脚本扩展源 / GD-only 源不在此列，恒视为启用。
 
 ---
 
@@ -860,15 +888,32 @@ BILIBILI_USER_AGENT=your_user_agent
 #   1) MUSIC_LX_SCRIPTS：URL / file:// / 本地路径，多个以逗号 / 空格分隔，
 #      或 JSON 数组 [{"id":"qsvip","url":"https://..."}]（含空格的路径请用 JSON 数组）；
 #   2) MUSIC_LX_SCRIPTS_DIR：目录，目录内每个 *.js 按文件名作为一个脚本；
-#   3) 两者都未设置时自动扫描仓库根目录 .lxref/scripts/*.js（“放入即生效”）。
+#   3) 两者都未设置时自动扫描进程 cwd 下 .lxref/scripts/*.js（本地开发“放入即生效”，仓库不随附脚本）。
 # TTL 控制脚本源码刷新间隔（默认 6h）。
 # MUSIC_LX_SCRIPTS=https://example.com/lx-source.js
 # MUSIC_LX_SCRIPTS_DIR=/opt/lx-scripts
 # MUSIC_LX_SCRIPT_TTL_MS=21600000
 
+# 平台能力矩阵（/api/music、/api/music/self、/api/music/resolve 生效，见 12）：
+# 二维开关分别约束各平台的 search（搜索引擎）与 play（播放引擎=取直链）。
+# 取值：留空 / "default" → 内置默认（search 仅停 tencent；play 仅开 netease/kuwo/joox）；
+#   "all" → 6 平台全开；JSON 对象 → 部分覆盖（未列平台保持当前值），如
+#   MUSIC_PLATFORM_SEARCH={"netease":false,"tencent":true}
+# 非法值忽略并告警（回退默认）。生效矩阵经 /api/music/caps 下发前端。
+# MUSIC_PLATFORM_SEARCH=
+# MUSIC_PLATFORM_PLAY=
+# 另有禁用黑名单 *_DISABLED（逗号分隔平台键，最终闸门，优先级最高——可压过上述
+# "all" / JSON 覆盖；留空 / "default" 回退内置默认），如：
+# MUSIC_PLATFORM_SEARCH_DISABLED=tencent
+# MUSIC_PLATFORM_PLAY_DISABLED=tencent,kugou,migu
+# 整体下线便捷变量 MUSIC_PLATFORM_OFF（逗号分隔平台键，最终闸门）——等效于把列出的平台
+# 同时写进上面两个黑名单（search/play 一并强制关），供「整体下线某平台」时只配一个变量：
+# MUSIC_PLATFORM_OFF=tencent,kugou,migu
+
 # 自研直连搜索（/api/music/self）：代码内直连实现（签名/deviceId 等自研构造），
-# 无需额外环境变量；覆盖 netease/kuwo/tencent/kugou/migu 五家（netease/kuwo 为搜索
-# 主通道，GD 搜索引擎仅兜底；tencent/kugou/migu 为独立搜索源 chips）。
+# 覆盖 netease/kuwo/tencent/kugou/migu 五家（netease/kuwo 为搜索主通道，GD 搜索引擎
+# 仅兜底；tencent/kugou/migu 为独立搜索源 chips）。某平台是否可被搜索仍受上述
+# MUSIC_PLATFORM_SEARCH 开关约束（默认仅停用 tencent，其余无需额外配置）。
 
 # 解析行为统计（Turso/libsql；未配置时记录功能自动禁用）
 TURSO_DB_URL=libsql://your-db.turso.io
